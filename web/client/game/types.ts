@@ -53,6 +53,13 @@ export type MapSize = "small" | "medium" | "large";
 
 export type Difficulty = "easy" | "normal" | "hard";
 
+/**
+ * "antiyoy": players start with one small province each and conquer the
+ * neutral island (like the original game). "slay": the whole island is
+ * divided between players from the start.
+ */
+export type GameMode = "antiyoy" | "slay";
+
 export interface GameConfig {
   mapSize: MapSize;
   /** Total players, 2..6. Player fraction 0 is always the human unless humanCount is 0. */
@@ -63,6 +70,8 @@ export interface GameConfig {
   seed: number;
   /** AI strength. Defaults to "normal" when omitted. */
   difficulty?: Difficulty;
+  /** Territory setup. Defaults to "antiyoy" when omitted. */
+  mode?: GameMode;
 }
 
 export interface GameState {

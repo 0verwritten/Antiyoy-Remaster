@@ -122,7 +122,11 @@ export function createGame(config: GameConfig): GameState {
   };
 
   growIsland(state, targetTiles, grid);
-  assignFractions(state);
+  if ((config.mode ?? "antiyoy") === "slay") {
+    assignFractionsSlay(state);
+  } else {
+    assignStartingProvinces(state);
+  }
   rebuildAllProvinces(state, true);
   sprinkleTrees(state);
   beginTurn(state); // income for player 0
@@ -160,10 +164,55 @@ function growIsland(state: GameState, target: number, grid: { w: number; h: numb
 }
 
 /**
- * Divide the island into small interleaved patches (2-4 hexes) so every
- * player starts with several small provinces, like the original generator.
+ * Antiyoy mode: each player starts with one small province; the rest of the
+ * island stays neutral and has to be conquered.
  */
-function assignFractions(state: GameState) {
+function assignStartingProvinces(state: GameState) {
+  const active = state.hexes.filter((h) => h.active);
+  const players = state.config.playerCount;
+  const seeds: HexTile[] = [];
+  for (let p = 0; p < players; p++) {
+    // Farthest-point sampling so starts are spread across the island.
+    let best: HexTile | null = null;
+    let bestDist = -1;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const cand = active[randomInt(state, active.length)];
+      let minDist = Infinity;
+      for (const s of seeds) minDist = Math.min(minDist, hexDistance(cand, s));
+      if (seeds.length === 0) minDist = 100 + randomInt(state, 10);
+      if (minDist > bestDist) {
+        bestDist = minDist;
+        best = cand;
+      }
+    }
+    seeds.push(best!);
+  }
+  const START_BLOB = 4;
+  for (let p = 0; p < players; p++) {
+    let current = seeds[p];
+    current.fraction = p;
+    for (let i = 1; i < START_BLOB; i++) {
+      const free = activeNeighbors(state, current).filter(
+        (n) => n.fraction === NEUTRAL_FRACTION
+      );
+      if (free.length === 0) break;
+      current = free[randomInt(state, free.length)];
+      current.fraction = p;
+    }
+  }
+}
+
+function hexDistance(a: HexTile, b: HexTile): number {
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
+/**
+ * Slay mode: divide the whole island into small interleaved patches (2-4
+ * hexes) so every player starts with several small provinces.
+ */
+function assignFractionsSlay(state: GameState) {
   const active = state.hexes.filter((h) => h.active);
   const players = state.config.playerCount;
   // Shuffle active hexes (Fisher-Yates with the seeded RNG).

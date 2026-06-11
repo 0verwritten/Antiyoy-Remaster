@@ -17,7 +17,7 @@ import {
   isHumanTurn,
 } from "./game/engine";
 import { aiTakeTurn } from "./game/ai";
-import type { Difficulty, GameConfig, GameState, MapSize, Province } from "./game/types";
+import type { Difficulty, GameConfig, GameMode, GameState, MapSize, Province } from "./game/types";
 import {
   fitToIsland,
   HEX_SIZE,
@@ -28,6 +28,7 @@ import {
 } from "./camera";
 import { pixelToHex, type Point } from "./hex";
 import { renderBoard, type RenderState } from "./render";
+import { aiDelayMs, saveSettings, settings } from "./settings";
 import {
   ATLAS_URL,
   ICON_COIN_URL,
@@ -63,6 +64,7 @@ type Pending =
 
 type Screen =
   | { kind: "start" }
+  | { kind: "settings" }
   | { kind: "game" }
   | { kind: "pass"; fraction: number }; // hotseat interstitial
 
@@ -158,7 +160,16 @@ export function App() {
   );
 
   if (screen.kind === "start") {
-    return <StartScreen onPlay={startGame} initial={configRef.current} />;
+    return (
+      <StartScreen
+        onPlay={startGame}
+        initial={configRef.current}
+        onSettings={() => setScreen({ kind: "settings" })}
+      />
+    );
+  }
+  if (screen.kind === "settings") {
+    return <SettingsScreen onBack={() => setScreen({ kind: "start" })} />;
   }
 
   return (
@@ -184,14 +195,17 @@ export function App() {
 function StartScreen({
   onPlay,
   initial,
+  onSettings,
 }: {
   onPlay: (config: GameConfig) => void;
   initial: GameConfig | null;
+  onSettings: () => void;
 }) {
   const [mapSize, setMapSize] = useState<MapSize>(initial?.mapSize ?? "medium");
   const [playerCount, setPlayerCount] = useState(initial?.playerCount ?? 2);
   const [humanCount, setHumanCount] = useState(initial?.humanCount ?? 1);
   const [difficulty, setDifficulty] = useState<Difficulty>(initial?.difficulty ?? "normal");
+  const [mode, setMode] = useState<GameMode>(initial?.mode ?? "antiyoy");
 
   const clampedHumans = Math.min(humanCount, playerCount);
 
@@ -202,6 +216,7 @@ function StartScreen({
       humanCount: clampedHumans,
       seed: Date.now() % 2 ** 31,
       difficulty,
+      mode,
     });
   }
 
@@ -269,6 +284,23 @@ function StartScreen({
           </div>
 
           <div>
+            <label className={labelCls}>
+              Game mode{" "}
+              <span className="font-normal opacity-60">
+                {mode === "antiyoy" ? "(conquer neutral land)" : "(all land owned from start)"}
+              </span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={mode === "antiyoy"} onClick={() => setMode("antiyoy")}>
+                Antiyoy
+              </Chip>
+              <Chip selected={mode === "slay"} onClick={() => setMode("slay")}>
+                Slay
+              </Chip>
+            </div>
+          </div>
+
+          <div>
             <label className={labelCls}>Difficulty</label>
             <div className="grid grid-cols-3 gap-2">
               {(["easy", "normal", "hard"] as Difficulty[]).map((d) => (
@@ -282,6 +314,7 @@ function StartScreen({
           <MenuButton onClick={play} className="mt-1 text-xl">
             Play
           </MenuButton>
+          <MenuButton onClick={onSettings}>Settings</MenuButton>
         </section>
       </div>
     </main>
@@ -432,15 +465,16 @@ function GameScreen(props: GameScreenProps) {
       aiTakeTurn(s);
       forceRender();
       refreshUi();
-      setTimeout(step, 400);
+      setTimeout(step, aiDelayMs());
     };
-    setTimeout(step, 400);
+    setTimeout(step, aiDelayMs());
   }, [stateRef, forceRender, refreshUi, setScreen]);
 
   const doEndTurn = useCallback(() => {
     const st = stateRef.current;
     if (!st || aiThinkingRef.current || st.winner !== null) return;
     if (!isHumanTurn(st)) return;
+    if (settings.confirmEndTurn && !confirm("End turn?")) return;
     clearSelection();
     undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
@@ -538,7 +572,7 @@ function GameScreen(props: GameScreenProps) {
       const prov = getProvinceByHex(st, idx);
       if (prov) {
         pendingRef.current = { kind: "none" };
-        selectedHexRef.current = idx;
+        selectedHexRef.current = -1; // the whole territory is highlighted instead
         highlightProvinceRef.current = prov.id;
         refreshUi();
         return;
@@ -562,7 +596,6 @@ function GameScreen(props: GameScreenProps) {
     // Re-select the province (if it still exists) so the HUD stays open.
     const prov = st.provinces.find((p) => p.id === provinceId);
     highlightProvinceRef.current = prov ? prov.id : -1;
-    if (prov && prov.capital >= 0) selectedHexRef.current = prov.capital;
     forceRender();
     refreshUi();
   }
@@ -649,8 +682,8 @@ function GameScreen(props: GameScreenProps) {
           state={state}
           province={selectedProvince}
           pending={pendingRef.current}
-          onBuyUnit={() => {
-            pendingRef.current = { kind: "buy", provinceId: selectedProvince.id, strength: 1 };
+          onBuyUnit={(strength) => {
+            pendingRef.current = { kind: "buy", provinceId: selectedProvince.id, strength };
             selectedHexRef.current = -1;
             refreshUi();
           }}
@@ -765,13 +798,12 @@ function ProvinceHud({
   state: GameState;
   province: Province;
   pending: Pending;
-  onBuyUnit: () => void;
+  onBuyUnit: (strength: number) => void;
   onBuild: (kind: "farm" | "tower" | "strongTower") => void;
 }) {
   const profit = getProvinceProfit(state, province);
   const farmPrice = getFarmPrice(state, province);
   const money = province.money;
-  const unitPrice = getUnitPrice(1);
 
   return (
     <div className="absolute bottom-20 left-1/2 -translate-x-1/2 sm:bottom-4">
@@ -787,14 +819,17 @@ function ProvinceHud({
           </span>
         </div>
 
-        <SpriteButton
-          sprite="man0"
-          price={unitPrice}
-          disabled={money < unitPrice}
-          active={pending.kind === "buy"}
-          onClick={onBuyUnit}
-          title="Buy unit (stack units to merge)"
-        />
+        {[1, 2, 3, 4].map((strength) => (
+          <SpriteButton
+            key={strength}
+            sprite={"man" + (strength - 1)}
+            price={getUnitPrice(strength)}
+            disabled={money < getUnitPrice(strength)}
+            active={pending.kind === "buy" && pending.strength === strength}
+            onClick={() => onBuyUnit(strength)}
+            title={"Buy unit " + strength + " (stack units to merge)"}
+          />
+        ))}
         <SpriteButton
           sprite="tower"
           price={PRICE_TOWER}
@@ -859,6 +894,85 @@ function SpriteButton({
         {price}
       </span>
     </button>
+  );
+}
+
+
+function SettingsScreen({ onBack }: { onBack: () => void }) {
+  const [, bump] = useState(0);
+  const refresh = () => bump((n) => n + 1);
+  const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
+
+  function set<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) {
+    settings[key] = value;
+    saveSettings();
+    refresh();
+  }
+
+  return (
+    <main
+      className="min-h-screen w-full flex items-center justify-center p-5"
+      style={{ background: MENU_BACKGROUND_COLOR }}
+    >
+      <div className="w-full max-w-md flex flex-col gap-6">
+        <header className="text-center">
+          <h1 className="text-4xl font-black tracking-tight text-[#f0eee3] drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">
+            Settings
+          </h1>
+        </header>
+
+        <section className="flex flex-col gap-5 rounded-3xl bg-[#b3ae7e] p-5 shadow-[0_4px_0_rgba(0,0,0,0.2)]">
+          <div>
+            <label className={labelCls}>AI speed</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["slow", "normal", "fast"] as const).map((v) => (
+                <Chip key={v} selected={settings.aiSpeed === v} onClick={() => set("aiSpeed", v)}>
+                  {v}
+                </Chip>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Hex outlines</label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={!settings.showAllBorders} onClick={() => set("showAllBorders", false)}>
+                Territory borders
+              </Chip>
+              <Chip selected={settings.showAllBorders} onClick={() => set("showAllBorders", true)}>
+                Full grid
+              </Chip>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Unit animations</label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={settings.unitAnimations} onClick={() => set("unitAnimations", true)}>
+                On
+              </Chip>
+              <Chip selected={!settings.unitAnimations} onClick={() => set("unitAnimations", false)}>
+                Off
+              </Chip>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Ask before ending turn</label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={settings.confirmEndTurn} onClick={() => set("confirmEndTurn", true)}>
+                On
+              </Chip>
+              <Chip selected={!settings.confirmEndTurn} onClick={() => set("confirmEndTurn", false)}>
+                Off
+              </Chip>
+            </div>
+          </div>
+
+          <MenuButton onClick={onBack}>Back</MenuButton>
+        </section>
+      </div>
+    </main>
   );
 }
 

@@ -1,10 +1,12 @@
 // Canvas renderer for the Antiyoy board, drawing the original game's sprites
 // (assets/skins/ant field-element atlas) over flat hexes in the original palette.
+// Hex outlines are drawn on territory borders only, like the original.
 
 import { NEUTRAL_FRACTION } from "./game/constants";
 import type { GameState, HexObj, HexTile } from "./game/types";
 import { type Camera, HEX_SIZE, worldToScreen } from "./camera";
 import { hexCorners, hexToPixel } from "./hex";
+import { settings } from "./settings";
 import {
   ATLAS_URL,
   ORIGINAL_FRACTION_COLORS,
@@ -14,9 +16,9 @@ import {
 } from "./sprites";
 
 export interface RenderState {
-  /** Hex index of the currently selected hex (province pick, unit, or capital). */
+  /** Hex index of the currently selected hex (a selected unit), or -1. */
   selectedHex: number;
-  /** Province id whose tiles should be emphasized, or -1. */
+  /** Province id whose whole territory should be highlighted, or -1. */
   highlightProvince: number;
   /** Set of hex indices that are "active" interaction targets (move/buy/build zone). */
   zone: Set<number> | null;
@@ -71,6 +73,44 @@ function shade(color: string, amount: number): string {
   return `rgb(${f(r)},${f(g)},${f(b)})`;
 }
 
+// --- neighbor-by-direction lookup ---------------------------------------------
+
+/** Must match the engine's neighbor order. */
+const AXIAL_DIRS = [
+  [1, 0],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, 1],
+];
+
+const coordCache = new WeakMap<GameState, Map<string, number>>();
+
+function coordIndex(state: GameState): Map<string, number> {
+  let m = coordCache.get(state);
+  if (!m) {
+    m = new Map();
+    for (const hex of state.hexes) m.set(hex.q + "," + hex.r, hex.index);
+    coordCache.set(state, m);
+  }
+  return m;
+}
+
+/** Neighbor tile in direction d, or null at the map edge. */
+function neighborAt(state: GameState, hex: HexTile, d: number): HexTile | null {
+  const idx = coordIndex(state).get(hex.q + AXIAL_DIRS[d][0] + "," + (hex.r + AXIAL_DIRS[d][1]));
+  return idx === undefined ? null : state.hexes[idx];
+}
+
+/**
+ * Edge index (into hexCorners) facing direction d, for pointy-top hexes:
+ * the edge between corners k and k+1, where k = (6 - d) % 6.
+ */
+function edgeCorner(d: number): number {
+  return (6 - d) % 6;
+}
+
 // --- main entry --------------------------------------------------------------
 
 export function renderBoard(
@@ -85,18 +125,27 @@ export function renderBoard(
   ctx.fillStyle = WATER_COLOR;
   ctx.fillRect(0, 0, cssW, cssH);
 
-  // Pass 1: tiles.
+  // Whole-territory highlight for the selected province.
+  let highlight: Set<number> | null = null;
+  if (rs.highlightProvince >= 0) {
+    const prov = state.provinces.find((p) => p.id === rs.highlightProvince);
+    if (prov) highlight = new Set(prov.hexes);
+  }
+
+  // Pass 1: tile fills.
   for (const hex of state.hexes) {
     if (!hex.active) continue;
-    drawTile(ctx, hex, cam, rs);
+    drawTileFill(ctx, hex, cam, rs, highlight);
   }
-  // Pass 2: contents + units (so they sit above neighboring outlines).
+  // Pass 2: territory borders (edges between different owners / water only).
+  drawBorders(ctx, state, cam, rs, highlight);
+  // Pass 3: contents + units.
   for (const hex of state.hexes) {
     if (!hex.active) continue;
     const dim = rs.dimNonZone && !(rs.zone && rs.zone.has(hex.index));
     drawContents(ctx, hex, cam, rs, dim);
   }
-  // Pass 3: zone markers + selection.
+  // Pass 4: zone markers + selected-unit ring.
   if (rs.zone && rs.dimNonZone) {
     for (const idx of rs.zone) {
       const hex = state.hexes[idx];
@@ -127,21 +176,94 @@ function tileScreen(hex: HexTile, cam: Camera) {
   return { cx: screen.x, cy: screen.y, s: HEX_SIZE * cam.scale };
 }
 
-function drawTile(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera, rs: RenderState) {
-  const { cx, cy, s } = tileScreen(hex, cam);
+function tileFillColor(hex: HexTile, rs: RenderState, highlight: Set<number> | null): string {
   let fill = fractionColor(hex.fraction);
   const inZone = rs.zone && rs.zone.has(hex.index);
   const dim = rs.dimNonZone && !inZone;
+  if (highlight && highlight.has(hex.index)) {
+    // The selected territory breathes a little, like the original.
+    const pulse = 0.1 + 0.06 * (0.5 + 0.5 * Math.sin(rs.now / 320));
+    fill = shade(fill, pulse);
+  }
   if (dim) fill = shade(fill, -0.45);
+  return fill;
+}
 
-  // The original draws flat tiles with hairline borders a touch darker
-  // than the tile itself.
-  hexPath(ctx, cx, cy, s);
-  ctx.fillStyle = fill;
+function drawTileFill(
+  ctx: CanvasRenderingContext2D,
+  hex: HexTile,
+  cam: Camera,
+  rs: RenderState,
+  highlight: Set<number> | null
+) {
+  const { cx, cy, s } = tileScreen(hex, cam);
+  // Tiny overdraw hides seams between adjacent same-color tiles.
+  hexPath(ctx, cx, cy, s * 1.02);
+  ctx.fillStyle = tileFillColor(hex, rs, highlight);
   ctx.fill();
-  ctx.lineWidth = Math.max(1, s * 0.045);
-  ctx.strokeStyle = shade(fill, -0.25);
-  ctx.stroke();
+}
+
+function drawBorders(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  cam: Camera,
+  rs: RenderState,
+  highlight: Set<number> | null
+) {
+  ctx.lineCap = "round";
+  for (const hex of state.hexes) {
+    if (!hex.active) continue;
+    const { cx, cy, s } = tileScreen(hex, cam);
+    const corners = hexCorners(s);
+    const fill = tileFillColor(hex, rs, highlight);
+
+    if (settings.showAllBorders) {
+      hexPath(ctx, cx, cy, s);
+      ctx.lineWidth = Math.max(1, s * 0.045);
+      ctx.strokeStyle = shade(fractionColor(hex.fraction), -0.25);
+      ctx.stroke();
+      continue;
+    }
+
+    for (let d = 0; d < 6; d++) {
+      const n = neighborAt(state, hex, d);
+      const isBorder = !n || !n.active || n.fraction !== hex.fraction;
+      if (!isBorder) continue;
+      const k = edgeCorner(d);
+      const a = corners[k];
+      const b = corners[(k + 1) % 6];
+      ctx.beginPath();
+      ctx.moveTo(cx + a.x, cy + a.y);
+      ctx.lineTo(cx + b.x, cy + b.y);
+      ctx.lineWidth = Math.max(1.2, s * 0.09);
+      ctx.strokeStyle = shade(fill, -0.35);
+      ctx.stroke();
+    }
+  }
+
+  // White pulsing outline around the selected territory.
+  if (highlight) {
+    const pulse = 0.55 + 0.35 * (0.5 + 0.5 * Math.sin(rs.now / 280));
+    ctx.strokeStyle = `rgba(255,255,255,${pulse.toFixed(3)})`;
+    for (const idx of highlight) {
+      const hex = state.hexes[idx];
+      if (!hex?.active) continue;
+      const { cx, cy, s } = tileScreen(hex, cam);
+      const corners = hexCorners(s);
+      for (let d = 0; d < 6; d++) {
+        const n = neighborAt(state, hex, d);
+        if (n && n.active && highlight.has(n.index)) continue;
+        const k = edgeCorner(d);
+        const a = corners[k];
+        const b = corners[(k + 1) % 6];
+        ctx.beginPath();
+        ctx.moveTo(cx + a.x, cy + a.y);
+        ctx.lineTo(cx + b.x, cy + b.y);
+        ctx.lineWidth = Math.max(2, s * 0.11);
+        ctx.stroke();
+      }
+    }
+  }
 }
 
 function drawZoneMarker(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera, now: number) {
@@ -233,10 +355,11 @@ function drawUnit(
   const unit = hex.unit!;
   // Original units jump in place while they can still move.
   let bob = 0;
-  if (unit.readyToMove) {
+  if (unit.readyToMove && settings.unitAnimations) {
     const t = (rs.now / 380 + hex.index * 0.7) % 1;
     bob = -Math.abs(Math.sin(t * Math.PI)) * s * 0.18;
-  } else {
+  }
+  if (!unit.readyToMove) {
     ctx.globalAlpha *= 0.8; // spent units rest, slightly faded
   }
   drawSprite(ctx, "man" + (unit.strength - 1), cx, cy + bob, s * 1.35);
