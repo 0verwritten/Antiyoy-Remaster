@@ -225,18 +225,22 @@ function drawBorders(
       continue;
     }
 
+    const isNeutral = hex.fraction >= NEUTRAL_FRACTION;
     for (let d = 0; d < 6; d++) {
       const n = neighborAt(state, hex, d);
-      const isBorder = !n || !n.active || n.fraction !== hex.fraction;
-      if (!isBorder) continue;
+      const ownershipEdge = !n || !n.active || n.fraction !== hex.fraction;
+      // Unclaimed land always shows its hex grid (like the original's gray
+      // tiles); owned territory is solid inside, outlined only at its border.
+      if (!ownershipEdge && !isNeutral) continue;
+      const innerNeutral = isNeutral && !ownershipEdge;
       const k = edgeCorner(d);
       const a = corners[k];
       const b = corners[(k + 1) % 6];
       ctx.beginPath();
       ctx.moveTo(cx + a.x, cy + a.y);
       ctx.lineTo(cx + b.x, cy + b.y);
-      ctx.lineWidth = Math.max(1.2, s * 0.09);
-      ctx.strokeStyle = shade(fill, -0.35);
+      ctx.lineWidth = innerNeutral ? Math.max(1, s * 0.05) : Math.max(1.2, s * 0.09);
+      ctx.strokeStyle = shade(fill, innerNeutral ? -0.18 : -0.35);
       ctx.stroke();
     }
   }
