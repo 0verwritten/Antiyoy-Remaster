@@ -1,3 +1,20 @@
+# Antiyoy Remaster — play it in your browser
+
+> **This fork adds a web remaster of Antiyoy, playable from desktop and mobile:**
+> ### 🎮 [antiyoy.lakebed.app](https://antiyoy.lakebed.app)
+>
+> The remaster is a from-scratch TypeScript + Preact + HTML5 Canvas rewrite living in
+> [`web/`](web/). Gameplay rules (unit costs, taxes, defense, farms, towers, tree
+> spread) are ported faithfully from the original Java source in this repository.
+> It supports mouse + keyboard on desktop and touch (pan, pinch-zoom, tap) on mobile,
+> with AI opponents and local hotseat multiplayer. Deployed with
+> [lakebed](https://www.npmjs.com/package/lakebed).
+>
+> All credit for the original game and its design goes to [yiotro](https://github.com/yiotro).
+> Like the original, this is a non-commercial project.
+
+---
+
 # Antiyoy
 Antiyoy is a simple turn-based android strategy. Easy to learn, hard to master.
 
