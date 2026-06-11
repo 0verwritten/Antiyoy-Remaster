@@ -25,6 +25,8 @@ import { aiDelayMs, settings } from "../settings";
 import { ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL, ORIGINAL_FRACTION_COLORS } from "../sprites";
 import type { Pending, Screen } from "./model";
 import { usePointerControls } from "../ui/pointer";
+import { MenuButton } from "../ui/controls";
+import { SettingsPanel } from "../ui/settings-panel";
 import { PassScreen } from "./pass";
 import { VictoryOverlay } from "./victory";
 import { ReplayViewer, type ReplayStep } from "./replay";
@@ -36,6 +38,7 @@ export interface GameScreenProps {
   configRef: { current: GameConfig | null };
   forceRender: () => void;
   onMenu: () => void;
+  onRestart: () => void;
   onPlayAgain: () => void;
 }
 
@@ -61,6 +64,8 @@ export function GameScreen(props: GameScreenProps) {
   const replayInitialRef = useRef<GameState>(structuredClone(state));
   const replayStepsRef = useRef<ReplayStep[]>([]);
   const [showReplay, setShowReplay] = useState(false);
+  // Pause menu overlays the board so the game is never unmounted.
+  const [paused, setPaused] = useState<"none" | "menu" | "settings">("none");
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -237,7 +242,7 @@ export function GameScreen(props: GameScreenProps) {
   // ---- pointer interaction (pan/zoom/tap) ----
   usePointerControls(canvasRef, camRef, () => {
     dirtyRef.current = true;
-  }, (screenPt) => onTap(screenPt), () => aiThinkingRef.current || screen.kind !== "game");
+  }, (screenPt) => onTap(screenPt), () => aiThinkingRef.current || screen.kind !== "game" || paused !== "none");
 
   function onTap(screenPt: Point) {
     const st = stateRef.current;
@@ -357,6 +362,10 @@ export function GameScreen(props: GameScreenProps) {
     const onKey = (e: KeyboardEvent) => {
       const st = stateRef.current;
       if (!st || screen.kind !== "game") return;
+      if (paused !== "none") {
+        if (e.key === "Escape") setPaused("none");
+        return;
+      }
       if (aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
       if (e.key === "Escape") {
         clearSelection();
@@ -377,7 +386,7 @@ export function GameScreen(props: GameScreenProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stateRef, screen.kind, clearSelection, doEndTurn, doUndo, refreshUi]);
+  }, [stateRef, screen.kind, paused, clearSelection, doEndTurn, doUndo, refreshUi]);
 
   // Selected province for the HUD.
   const selectedProvince = currentSelectedProvince(state, highlightProvinceRef.current);
@@ -407,14 +416,7 @@ export function GameScreen(props: GameScreenProps) {
       />
 
       {/* Top bar */}
-      <TopBar
-        state={state}
-        onMenu={() => {
-          if (state.winner !== null || confirm("Return to menu? Current game will be lost.")) {
-            props.onMenu();
-          }
-        }}
-      />
+      <TopBar state={state} onMenu={() => setPaused("menu")} />
 
       {/* AI thinking indicator */}
       {aiThinkingRef.current && (
@@ -486,6 +488,33 @@ export function GameScreen(props: GameScreenProps) {
         >
           <img src={ICON_ENDTURN_URL} alt="End turn" className="h-10 w-10" />
         </button>
+      )}
+
+      {/* Pause menu: the game stays mounted underneath */}
+      {paused !== "none" && state.winner === null && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          {paused === "menu" ? (
+            <div className="flex w-full max-w-xs flex-col gap-3 rounded-3xl bg-[#b3ae7e] p-6 shadow-[0_4px_0_rgba(0,0,0,0.25)]">
+              <h2 className="mb-1 text-center text-2xl font-black text-[#2e2e28]">Paused</h2>
+              <MenuButton onClick={() => setPaused("none")}>Resume</MenuButton>
+              <MenuButton
+                onClick={() => {
+                  if (confirm("Restart this game from the beginning?")) props.onRestart();
+                }}
+              >
+                Restart
+              </MenuButton>
+              <MenuButton onClick={() => setPaused("settings")}>Settings</MenuButton>
+              <MenuButton onClick={props.onMenu}>Main menu</MenuButton>
+            </div>
+          ) : (
+            <div className="flex max-h-[90vh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-3xl bg-[#b3ae7e] p-6 shadow-[0_4px_0_rgba(0,0,0,0.25)]">
+              <h2 className="text-center text-2xl font-black text-[#2e2e28]">Settings</h2>
+              <SettingsPanel />
+              <MenuButton onClick={() => setPaused("menu")}>Back</MenuButton>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Victory overlay */}

@@ -1,8 +1,16 @@
 // UI screen model shared by the app shell and the screen components.
 
-/** Top-level UI screen. Grows as legacy menus are ported (main, chooseMode, …). */
+/**
+ * Top-level UI screen. Mirrors the legacy menu hierarchy; destinations are
+ * added as they are implemented (campaign, load, replays, editor…) — never
+ * as dead buttons. "Play" routes straight to skirmish until a second game
+ * destination exists.
+ */
 export type Screen =
-  | { kind: "start" }
+  | { kind: "main" }
+  | { kind: "skirmish" }
+  | { kind: "settings" }
+  | { kind: "about" }
   | { kind: "game" }
   | { kind: "pass"; fraction: number }; // hotseat interstitial
 

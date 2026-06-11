@@ -16,6 +16,9 @@ page.on("console", (m) => {
 });
 
 await page.goto(base + "/", { waitUntil: "networkidle", timeout: 45000 });
+// Main menu -> skirmish setup -> start the game.
+await page.getByRole("button", { name: /^play$/i }).click();
+await page.waitForTimeout(300);
 await page.getByRole("button", { name: /^play$/i }).click();
 await page.waitForTimeout(1800);
 await page.screenshot({ path: "/tmp/antiyoy-check-game.png" });
@@ -51,6 +54,24 @@ await page.waitForTimeout(3500);
 const after = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(0, 80));
 console.log("after end turn:", after);
 await page.screenshot({ path: "/tmp/antiyoy-check-round2.png" });
+
+// Pause menu round-trip: open, into settings and back, resume.
+await page.getByRole("button", { name: /^menu$/i }).click();
+const pausedText = await page.evaluate(() => document.body.innerText);
+if (!/Paused/.test(pausedText)) throw new Error("pause menu did not open");
+await page.getByRole("button", { name: /^settings$/i }).click();
+await page.getByRole("button", { name: /^back$/i }).click();
+await page.getByRole("button", { name: /^resume$/i }).click();
+const resumed = await page.evaluate(() => document.body.innerText);
+if (/Paused/.test(resumed)) throw new Error("pause menu did not close");
+console.log("pause menu: ok");
+
+// Main menu keeps the running game resumable.
+await page.getByRole("button", { name: /^menu$/i }).click();
+await page.getByRole("button", { name: /main menu/i }).click();
+await page.getByRole("button", { name: /^resume$/i }).click();
+const backInGame = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(0, 80));
+console.log("after main-menu resume:", backInGame);
 
 console.log("ERRORS:", errors.length ? errors.join("\n") : "none");
 console.log("screenshots: /tmp/antiyoy-check-game.png /tmp/antiyoy-check-round2.png");

@@ -6,7 +6,10 @@ import { useCallback, useRef, useState } from "preact/hooks";
 import { createGame } from "./game/engine";
 import type { GameConfig, GameState } from "./game/types";
 import type { Screen } from "./screens/model";
-import { StartScreen } from "./screens/start";
+import { MainMenuScreen } from "./screens/main";
+import { SkirmishScreen } from "./screens/skirmish";
+import { SettingsScreen } from "./screens/settings";
+import { AboutScreen } from "./screens/about";
 import { GameScreen } from "./screens/game";
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
@@ -34,9 +37,12 @@ if (typeof document !== "undefined" && !document.querySelector("link[rel='icon']
 }
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>({ kind: "start" });
+  const [screen, setScreen] = useState<Screen>({ kind: "main" });
   const stateRef = useRef<GameState | null>(null);
   const configRef = useRef<GameConfig | null>(null);
+  // Bumped per started game so GameScreen remounts even when the config and
+  // seed are identical (Restart).
+  const gameIdRef = useRef(0);
   const [, bump] = useState(0);
   const forceRender = useCallback(() => bump((n) => n + 1), []);
 
@@ -44,34 +50,66 @@ export function App() {
     (config: GameConfig) => {
       configRef.current = config;
       stateRef.current = createGame(config);
+      gameIdRef.current++;
       setScreen({ kind: "game" });
       forceRender();
     },
     [forceRender]
   );
 
-  if (screen.kind === "start") {
-    return (
-      <StartScreen
-        onPlay={startGame}
-        initial={configRef.current}
-      />
-    );
-  }
+  const resumeGame = useCallback(() => {
+    const st = stateRef.current;
+    if (!st || st.winner !== null) return;
+    // Hotseat: never show a player's board before the pass screen.
+    if (st.config.humanCount >= 2 && st.turn < st.config.humanCount) {
+      setScreen({ kind: "pass", fraction: st.turn });
+    } else {
+      setScreen({ kind: "game" });
+    }
+  }, []);
 
-  return (
-    <GameScreen
-      key={configRef.current?.seed}
-      screen={screen}
-      setScreen={setScreen}
-      stateRef={stateRef}
-      configRef={configRef}
-      forceRender={forceRender}
-      onMenu={() => setScreen({ kind: "start" })}
-      onPlayAgain={() => {
-        const cfg = configRef.current;
-        if (cfg) startGame({ ...cfg, seed: Date.now() % 2 ** 31 });
-      }}
-    />
-  );
+  switch (screen.kind) {
+    case "main":
+      return (
+        <MainMenuScreen
+          canResume={stateRef.current !== null && stateRef.current.winner === null}
+          onPlay={() => setScreen({ kind: "skirmish" })}
+          onResume={resumeGame}
+          onSettings={() => setScreen({ kind: "settings" })}
+          onAbout={() => setScreen({ kind: "about" })}
+        />
+      );
+    case "skirmish":
+      return (
+        <SkirmishScreen
+          onPlay={startGame}
+          onBack={() => setScreen({ kind: "main" })}
+          initial={configRef.current}
+        />
+      );
+    case "settings":
+      return <SettingsScreen onBack={() => setScreen({ kind: "main" })} />;
+    case "about":
+      return <AboutScreen onBack={() => setScreen({ kind: "main" })} />;
+    default:
+      return (
+        <GameScreen
+          key={gameIdRef.current}
+          screen={screen}
+          setScreen={setScreen}
+          stateRef={stateRef}
+          configRef={configRef}
+          forceRender={forceRender}
+          onMenu={() => setScreen({ kind: "main" })}
+          onRestart={() => {
+            const cfg = configRef.current;
+            if (cfg) startGame({ ...cfg });
+          }}
+          onPlayAgain={() => {
+            const cfg = configRef.current;
+            if (cfg) startGame({ ...cfg, seed: Date.now() % 2 ** 31 });
+          }}
+        />
+      );
+  }
 }
