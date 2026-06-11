@@ -1,0 +1,31 @@
+// Builds the lakebed capsule and fails if the client bundle is over budget.
+// lakebed's hard artifact limit is 1 MB; we gate at 900 KB to keep headroom
+// for campaign data and diplomacy code. Run before every deploy.
+// Usage: node devtools/check-bundle.mjs [budgetBytes]
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const BUDGET = Number(process.argv[2] ?? 900 * 1024);
+const webDir = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
+
+execFileSync("npx", ["lakebed", "build", "--target", "anonymous"], {
+  cwd: webDir,
+  stdio: ["ignore", "ignore", "inherit"],
+});
+
+const artifact = JSON.parse(
+  readFileSync(join(webDir, ".lakebed/artifacts/web.anonymous.json"), "utf8")
+).artifact;
+const client = artifact.client.bytes;
+const server = artifact.server.source.bytes;
+const kb = (n) => (n / 1024).toFixed(1) + " KB";
+console.log(`client bundle: ${kb(client)} (budget ${kb(BUDGET)}, hard limit 1024.0 KB)`);
+console.log(`server bundle: ${kb(server)}`);
+
+if (client > BUDGET) {
+  console.error(`FAIL: client bundle exceeds the ${kb(BUDGET)} budget`);
+  process.exit(1);
+}
+console.log("OK: bundle within budget");
