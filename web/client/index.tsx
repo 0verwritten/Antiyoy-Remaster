@@ -251,19 +251,23 @@ function StartScreen({
 
           <div>
             <label className={labelCls}>Players: {playerCount}</label>
-            <div className="grid grid-cols-5 gap-2">
-              {[2, 3, 4, 5, 6].map((n) => (
-                <Chip
-                  key={n}
-                  selected={playerCount === n}
-                  onClick={() => {
-                    setPlayerCount(n);
-                    if (humanCount > n) setHumanCount(n);
-                  }}
-                >
-                  {n}
-                </Chip>
-              ))}
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-[#2e2e28]/60">2</span>
+              <input
+                type="range"
+                min="2"
+                max="6"
+                step="1"
+                value={playerCount}
+                aria-label="Player count"
+                onInput={(event) => {
+                  const count = Number(event.currentTarget.value);
+                  setPlayerCount(count);
+                  if (humanCount > count) setHumanCount(count);
+                }}
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#3a3a33]"
+              />
+              <span className="text-xs font-bold text-[#2e2e28]/60">6</span>
             </div>
           </div>
 
@@ -274,29 +278,19 @@ function StartScreen({
                 {clampedHumans === 0 ? "(watch AI)" : clampedHumans === 1 ? "(vs AI)" : "(pass & play)"}
               </span>
             </label>
-            <div className="flex flex-wrap gap-2">
-              {Array.from({ length: playerCount + 1 }, (_, i) => i).map((n) => (
-                <Chip key={n} selected={clampedHumans === n} onClick={() => setHumanCount(n)}>
-                  {n}
-                </Chip>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>
-              Game mode{" "}
-              <span className="font-normal opacity-60">
-                {mode === "antiyoy" ? "(conquer neutral land)" : "(all land owned from start)"}
-              </span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <Chip selected={mode === "antiyoy"} onClick={() => setMode("antiyoy")}>
-                Antiyoy
-              </Chip>
-              <Chip selected={mode === "slay"} onClick={() => setMode("slay")}>
-                Slay
-              </Chip>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-[#2e2e28]/60">0</span>
+              <input
+                type="range"
+                min="0"
+                max={playerCount}
+                step="1"
+                value={clampedHumans}
+                aria-label="Human player count"
+                onInput={(event) => setHumanCount(Number(event.currentTarget.value))}
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#3a3a33]"
+              />
+              <span className="min-w-[1ch] text-xs font-bold text-[#2e2e28]/60">{playerCount}</span>
             </div>
           </div>
 
@@ -310,6 +304,26 @@ function StartScreen({
               ))}
             </div>
           </div>
+
+          <details className="rounded-2xl bg-[#a49f70] px-4 py-3 text-[#2e2e28]">
+            <summary className="cursor-pointer select-none text-sm font-bold">Additional settings</summary>
+            <div className="mt-4">
+              <label className={labelCls}>
+                Game mode{" "}
+                <span className="font-normal opacity-60">
+                  {mode === "antiyoy" ? "(conquer neutral land)" : "(all land owned from start)"}
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <Chip selected={mode === "antiyoy"} onClick={() => setMode("antiyoy")}>
+                  Normal
+                </Chip>
+                <Chip selected={mode === "slay"} onClick={() => setMode("slay")}>
+                  Slay
+                </Chip>
+              </div>
+            </div>
+          </details>
 
           <MenuButton onClick={play} className="mt-1 text-xl">
             Play
@@ -827,54 +841,56 @@ function ProvinceHud({
   const money = province.money;
 
   return (
-    <div className="absolute bottom-20 left-1/2 -translate-x-1/2 sm:bottom-4">
-      <div className="flex items-center gap-2 rounded-2xl bg-[#f0eee3] px-3 py-2 text-[#3a3a33] shadow-[0_3px_0_rgba(0,0,0,0.3)]">
+    <div className="absolute bottom-20 left-1/2 w-[calc(100%-1rem)] max-w-[570px] -translate-x-1/2 sm:bottom-4 sm:w-auto">
+      <div className="rounded-2xl bg-[#f0eee3] p-2 text-[#3a3a33] shadow-[0_3px_0_rgba(0,0,0,0.3)] sm:flex sm:items-center sm:gap-2 sm:px-3">
         {/* Money */}
-        <div className="mr-1 flex flex-col items-center px-1">
+        <div className="mb-1 flex items-center justify-center gap-2 px-1 sm:mb-0 sm:mr-1 sm:flex-col sm:gap-0">
           <span className="flex items-center gap-1.5">
-            <img src={ICON_COIN_URL} alt="" className="h-6 w-6" />
-            <span className="text-xl font-black leading-none">{money}</span>
+            <img src={ICON_COIN_URL} alt="" className="h-5 w-5 sm:h-6 sm:w-6" />
+            <span className="text-lg font-black leading-none sm:text-xl">{money}</span>
           </span>
           <span className={`text-xs font-bold ${profit >= 0 ? "text-[#2c7a2c]" : "text-[#a3322a]"}`}>
             {profit >= 0 ? `+${profit}` : `${profit}`}
           </span>
         </div>
 
-        {[1, 2, 3, 4].map((strength) => (
+        <div className="grid grid-cols-7 gap-1 sm:flex sm:gap-2">
+          {[1, 2, 3, 4].map((strength) => (
+            <SpriteButton
+              key={strength}
+              sprite={"man" + (strength - 1)}
+              price={getUnitPrice(strength)}
+              disabled={money < getUnitPrice(strength)}
+              active={pending.kind === "buy" && pending.strength === strength}
+              onClick={() => onBuyUnit(strength)}
+              title={"Buy unit " + strength + " (stack units to merge)"}
+            />
+          ))}
           <SpriteButton
-            key={strength}
-            sprite={"man" + (strength - 1)}
-            price={getUnitPrice(strength)}
-            disabled={money < getUnitPrice(strength)}
-            active={pending.kind === "buy" && pending.strength === strength}
-            onClick={() => onBuyUnit(strength)}
-            title={"Buy unit " + strength + " (stack units to merge)"}
+            sprite="tower"
+            price={PRICE_TOWER}
+            disabled={money < PRICE_TOWER}
+            active={pending.kind === "build" && pending.buildKind === "tower"}
+            onClick={() => onBuild("tower")}
+            title="Build tower"
           />
-        ))}
-        <SpriteButton
-          sprite="tower"
-          price={PRICE_TOWER}
-          disabled={money < PRICE_TOWER}
-          active={pending.kind === "build" && pending.buildKind === "tower"}
-          onClick={() => onBuild("tower")}
-          title="Build tower"
-        />
-        <SpriteButton
-          sprite="strong_tower"
-          price={PRICE_STRONG_TOWER}
-          disabled={money < PRICE_STRONG_TOWER}
-          active={pending.kind === "build" && pending.buildKind === "strongTower"}
-          onClick={() => onBuild("strongTower")}
-          title="Build strong tower"
-        />
-        <SpriteButton
-          sprite="farm1"
-          price={farmPrice}
-          disabled={money < farmPrice}
-          active={pending.kind === "build" && pending.buildKind === "farm"}
-          onClick={() => onBuild("farm")}
-          title="Build farm"
-        />
+          <SpriteButton
+            sprite="strong_tower"
+            price={PRICE_STRONG_TOWER}
+            disabled={money < PRICE_STRONG_TOWER}
+            active={pending.kind === "build" && pending.buildKind === "strongTower"}
+            onClick={() => onBuild("strongTower")}
+            title="Build strong tower"
+          />
+          <SpriteButton
+            sprite="farm1"
+            price={farmPrice}
+            disabled={money < farmPrice}
+            active={pending.kind === "build" && pending.buildKind === "farm"}
+            onClick={() => onBuild("farm")}
+            title="Build farm"
+          />
+        </div>
       </div>
     </div>
   );
@@ -901,11 +917,11 @@ function SpriteButton({
       disabled={disabled}
       onClick={onClick}
       title={title}
-      className={`flex min-h-[56px] min-w-[52px] flex-col items-center justify-center rounded-xl px-1 py-1 transition ${
+      className={`flex min-h-[50px] min-w-0 flex-col items-center justify-center rounded-lg px-0.5 py-0.5 transition sm:min-h-[56px] sm:min-w-[52px] sm:rounded-xl sm:px-1 sm:py-1 ${
         active ? "bg-[#3a3a33]" : "bg-[#e2dfc8]"
       } ${disabled ? "opacity-40" : "hover:brightness-95 active:translate-y-[1px]"}`}
     >
-      <Sprite name={sprite} size={34} />
+      <Sprite name={sprite} size={30} />
       <span
         className={`mt-0.5 flex items-center gap-0.5 text-[11px] font-bold ${
           active ? "text-[#f0eee3]" : "text-[#3a3a33]"
