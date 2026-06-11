@@ -51,6 +51,8 @@ export interface Province {
 
 export type MapSize = "small" | "medium" | "large";
 
+export type Difficulty = "easy" | "normal" | "hard";
+
 export interface GameConfig {
   mapSize: MapSize;
   /** Total players, 2..6. Player fraction 0 is always the human unless humanCount is 0. */
@@ -59,6 +61,8 @@ export interface GameConfig {
   humanCount: number;
   /** RNG seed. Same seed + config => same map. */
   seed: number;
+  /** AI strength. Defaults to "normal" when omitted. */
+  difficulty?: Difficulty;
 }
 
 export interface GameState {

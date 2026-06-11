@@ -1,13 +1,9 @@
 // Antiyoy Remaster — client UI entry. Fully client-side gameplay; no Lakebed
-// queries/mutations needed. Renders a canvas board with pan/zoom and a HUD.
+// queries/mutations needed. Canvas board with pan/zoom and an original-style HUD.
 
+import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import {
-  FRACTION_COLORS,
-  NEUTRAL_FRACTION,
-  PRICE_STRONG_TOWER,
-  PRICE_TOWER,
-} from "./game/constants";
+import { NEUTRAL_FRACTION, PRICE_STRONG_TOWER, PRICE_TOWER } from "./game/constants";
 import {
   applyAction,
   createGame,
@@ -21,7 +17,7 @@ import {
   isHumanTurn,
 } from "./game/engine";
 import { aiTakeTurn } from "./game/ai";
-import type { GameConfig, GameState, MapSize, Province } from "./game/types";
+import type { Difficulty, GameConfig, GameState, MapSize, Province } from "./game/types";
 import {
   fitToIsland,
   HEX_SIZE,
@@ -32,6 +28,28 @@ import {
 } from "./camera";
 import { pixelToHex, type Point } from "./hex";
 import { renderBoard, type RenderState } from "./render";
+import {
+  ATLAS_URL,
+  ICON_COIN_URL,
+  ICON_ENDTURN_URL,
+  ICON_UNDO_URL,
+  MENU_BACKGROUND_COLOR,
+  ORIGINAL_FRACTION_COLORS,
+  SPRITES,
+} from "./sprites";
+
+const ATLAS_W = 1024;
+const ATLAS_H = 604;
+
+// Canonical domain: the capsule answers on several lakebed subdomains, but the
+// game lives at antiyoy.lakebed.app only.
+if (
+  typeof location !== "undefined" &&
+  location.hostname.endsWith(".lakebed.app") &&
+  location.hostname !== "antiyoy.lakebed.app"
+) {
+  location.replace("https://antiyoy.lakebed.app" + location.pathname + location.search);
+}
 
 // ---------------------------------------------------------------------------
 // Placement / selection model
@@ -47,6 +65,76 @@ type Screen =
   | { kind: "start" }
   | { kind: "game" }
   | { kind: "pass"; fraction: number }; // hotseat interstitial
+
+// ---------------------------------------------------------------------------
+// Original-look building blocks
+// ---------------------------------------------------------------------------
+
+/** A sprite from the original field-element atlas, rendered via CSS. */
+function Sprite({ name, size }: { name: string; size: number }) {
+  const r = SPRITES[name];
+  if (!r) return null;
+  const scale = size / r.w;
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block"
+      style={{
+        width: size,
+        height: size,
+        backgroundImage: `url(${ATLAS_URL})`,
+        backgroundSize: `${ATLAS_W * scale}px ${ATLAS_H * scale}px`,
+        backgroundPosition: `-${r.x * scale}px -${r.y * scale}px`,
+        backgroundRepeat: "no-repeat",
+        imageRendering: "auto",
+      }}
+    />
+  );
+}
+
+/** Big cream rounded button like the original menus. */
+function MenuButton({
+  children,
+  onClick,
+  className = "",
+}: {
+  children: ComponentChildren;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[56px] rounded-2xl bg-[#f0eee3] px-6 text-lg font-bold text-[#3a3a33] shadow-[0_3px_0_rgba(0,0,0,0.25)] transition active:translate-y-[2px] active:shadow-none ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Small option chip in the original cream/olive style. */
+function Chip({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: ComponentChildren;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[44px] min-w-[44px] rounded-xl px-3 text-sm font-bold capitalize transition shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none ${
+        selected ? "bg-[#3a3a33] text-[#f0eee3]" : "bg-[#f0eee3] text-[#3a3a33]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // App
@@ -90,7 +178,7 @@ export function App() {
 }
 
 // ---------------------------------------------------------------------------
-// Start screen
+// Start screen (original olive menu look)
 // ---------------------------------------------------------------------------
 
 function StartScreen({
@@ -103,115 +191,97 @@ function StartScreen({
   const [mapSize, setMapSize] = useState<MapSize>(initial?.mapSize ?? "medium");
   const [playerCount, setPlayerCount] = useState(initial?.playerCount ?? 2);
   const [humanCount, setHumanCount] = useState(initial?.humanCount ?? 1);
+  const [difficulty, setDifficulty] = useState<Difficulty>(initial?.difficulty ?? "normal");
 
-  // Keep humanCount <= playerCount.
   const clampedHumans = Math.min(humanCount, playerCount);
 
   function play() {
     onPlay({
       mapSize,
       playerCount,
-      humanCount: Math.min(humanCount, playerCount),
+      humanCount: clampedHumans,
       seed: Date.now() % 2 ** 31,
+      difficulty,
     });
   }
 
+  const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
+
   return (
-    <main className="min-h-screen w-full bg-gradient-to-b from-slate-900 to-slate-950 text-slate-100 flex items-center justify-center p-5">
-      <div className="w-full max-w-md flex flex-col gap-7">
+    <main
+      className="min-h-screen w-full flex items-center justify-center p-5"
+      style={{ background: MENU_BACKGROUND_COLOR }}
+    >
+      <div className="w-full max-w-md flex flex-col gap-6">
         <header className="text-center">
-          <h1 className="text-4xl sm:text-5xl font-black tracking-tight">
-            Antiyoy <span className="text-emerald-400">Remaster</span>
+          <h1 className="text-5xl font-black tracking-tight text-[#f0eee3] drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">
+            Antiyoy
           </h1>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-1 text-xs font-semibold text-[#2e2e28]/70">
             Web remaster of Antiyoy by yiotro
           </p>
         </header>
 
-        <section className="flex flex-col gap-5 rounded-2xl bg-slate-800/60 p-5 ring-1 ring-white/10">
-          {/* Map size */}
+        <section className="flex flex-col gap-5 rounded-3xl bg-[#b3ae7e] p-5 shadow-[0_4px_0_rgba(0,0,0,0.2)]">
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-300">
-              Map size
-            </label>
+            <label className={labelCls}>Map size</label>
             <div className="grid grid-cols-3 gap-2">
               {(["small", "medium", "large"] as MapSize[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMapSize(m)}
-                  className={`min-h-[44px] rounded-lg px-3 py-2 text-sm font-medium capitalize transition ${
-                    mapSize === m
-                      ? "bg-emerald-500 text-slate-900"
-                      : "bg-slate-700/70 text-slate-200 hover:bg-slate-700"
-                  }`}
-                >
+                <Chip key={m} selected={mapSize === m} onClick={() => setMapSize(m)}>
                   {m}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
 
-          {/* Players */}
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-300">
-              Players: <span className="text-emerald-400">{playerCount}</span>
-            </label>
+            <label className={labelCls}>Players: {playerCount}</label>
             <div className="grid grid-cols-5 gap-2">
               {[2, 3, 4, 5, 6].map((n) => (
-                <button
+                <Chip
                   key={n}
-                  type="button"
+                  selected={playerCount === n}
                   onClick={() => {
                     setPlayerCount(n);
                     if (humanCount > n) setHumanCount(n);
                   }}
-                  className={`min-h-[44px] rounded-lg text-sm font-bold transition ${
-                    playerCount === n
-                      ? "bg-emerald-500 text-slate-900"
-                      : "bg-slate-700/70 text-slate-200 hover:bg-slate-700"
-                  }`}
                 >
                   {n}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
 
-          {/* Humans */}
           <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-300">
-              Humans (hotseat):{" "}
-              <span className="text-emerald-400">{clampedHumans}</span>
-              <span className="ml-1 text-xs font-normal text-slate-500">
-                {clampedHumans === 1 ? "vs AI" : "pass & play"}
+            <label className={labelCls}>
+              Humans: {clampedHumans}{" "}
+              <span className="font-normal opacity-60">
+                {clampedHumans === 1 ? "(vs AI)" : "(pass & play)"}
               </span>
             </label>
             <div className="flex flex-wrap gap-2">
               {Array.from({ length: playerCount }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setHumanCount(n)}
-                  className={`min-h-[44px] min-w-[44px] rounded-lg px-3 text-sm font-bold transition ${
-                    clampedHumans === n
-                      ? "bg-emerald-500 text-slate-900"
-                      : "bg-slate-700/70 text-slate-200 hover:bg-slate-700"
-                  }`}
-                >
+                <Chip key={n} selected={clampedHumans === n} onClick={() => setHumanCount(n)}>
                   {n}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={play}
-            className="mt-1 min-h-[52px] rounded-xl bg-emerald-500 text-lg font-black text-slate-900 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-[0.99]"
-          >
+          <div>
+            <label className={labelCls}>Difficulty</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(["easy", "normal", "hard"] as Difficulty[]).map((d) => (
+                <Chip key={d} selected={difficulty === d} onClick={() => setDifficulty(d)}>
+                  {d}
+                </Chip>
+              ))}
+            </div>
+          </div>
+
+          <MenuButton onClick={play} className="mt-1 text-xl">
             Play
-          </button>
+          </MenuButton>
         </section>
       </div>
     </main>
@@ -232,6 +302,8 @@ interface GameScreenProps {
   onPlayAgain: () => void;
 }
 
+const UNDO_STACK_LIMIT = 50;
+
 function GameScreen(props: GameScreenProps) {
   const { stateRef, forceRender, setScreen, screen } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -241,6 +313,7 @@ function GameScreen(props: GameScreenProps) {
   const highlightProvinceRef = useRef<number>(-1);
   const aiThinkingRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(true);
+  const undoRef = useRef<GameState[]>([]);
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -304,6 +377,27 @@ function GameScreen(props: GameScreenProps) {
     refreshUi();
   }, [refreshUi]);
 
+  /** Snapshot the state so the move can be undone (current turn only). */
+  const pushUndo = useCallback(() => {
+    const st = stateRef.current;
+    if (!st) return;
+    undoRef.current.push(structuredClone(st));
+    if (undoRef.current.length > UNDO_STACK_LIMIT) undoRef.current.shift();
+  }, [stateRef]);
+
+  const doUndo = useCallback(() => {
+    const st = stateRef.current;
+    if (!st || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+    const prev = undoRef.current.pop();
+    if (!prev) return;
+    stateRef.current = prev;
+    pendingRef.current = { kind: "none" };
+    selectedHexRef.current = -1;
+    highlightProvinceRef.current = -1;
+    forceRender();
+    refreshUi();
+  }, [stateRef, forceRender, refreshUi]);
+
   const runAiIfNeeded = useCallback(() => {
     const st = stateRef.current;
     if (!st) return;
@@ -348,6 +442,7 @@ function GameScreen(props: GameScreenProps) {
     if (!st || aiThinkingRef.current || st.winner !== null) return;
     if (!isHumanTurn(st)) return;
     clearSelection();
+    undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
     forceRender();
     runAiIfNeeded();
@@ -382,6 +477,7 @@ function GameScreen(props: GameScreenProps) {
       if (province) {
         const zone = getBuyZone(st, province, pending.strength);
         if (zone.includes(idx)) {
+          pushUndo();
           applyAction(st, {
             type: "buyUnit",
             provinceId: province.id,
@@ -400,6 +496,7 @@ function GameScreen(props: GameScreenProps) {
       if (province) {
         const zone = getBuildZone(st, province, pending.buildKind);
         if (zone.includes(idx)) {
+          pushUndo();
           applyAction(st, {
             type: "build",
             kind: pending.buildKind,
@@ -416,6 +513,7 @@ function GameScreen(props: GameScreenProps) {
     if (pending.kind === "unit") {
       const zone = getMoveZone(st, pending.from);
       if (zone.includes(idx)) {
+        pushUndo();
         applyAction(st, { type: "moveUnit", from: pending.from, to: idx });
         // Movement may rebuild provinces; recompute highlight by hex.
         const prov = getProvinceByHex(st, idx);
@@ -479,6 +577,8 @@ function GameScreen(props: GameScreenProps) {
         clearSelection();
       } else if (e.key === "e" || e.key === "E" || e.key === "Enter") {
         doEndTurn();
+      } else if (e.key === "u" || e.key === "U" || e.key === "z" || e.key === "Z") {
+        doUndo();
       } else if (e.key >= "1" && e.key <= "4") {
         const prov = currentSelectedProvince(st, highlightProvinceRef.current);
         if (prov) {
@@ -492,7 +592,7 @@ function GameScreen(props: GameScreenProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stateRef, screen.kind, clearSelection, doEndTurn, refreshUi]);
+  }, [stateRef, screen.kind, clearSelection, doEndTurn, doUndo, refreshUi]);
 
   // Selected province for the HUD.
   const selectedProvince = currentSelectedProvince(state, highlightProvinceRef.current);
@@ -514,7 +614,7 @@ function GameScreen(props: GameScreenProps) {
   const human = isHumanTurn(state) && !aiThinkingRef.current && state.winner === null;
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 select-none">
+    <main className="relative h-screen w-screen overflow-hidden bg-[#2a628f] text-slate-100 select-none">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
@@ -533,7 +633,7 @@ function GameScreen(props: GameScreenProps) {
 
       {/* AI thinking indicator */}
       {aiThinkingRef.current && (
-        <div className="pointer-events-none absolute left-1/2 top-20 -translate-x-1/2 rounded-full bg-slate-900/90 px-4 py-2 text-sm font-semibold ring-1 ring-white/10">
+        <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-[#f0eee3] px-4 py-2 text-sm font-bold text-[#3a3a33] shadow">
           <span className="inline-block animate-pulse">AI thinking…</span>
         </div>
       )}
@@ -543,14 +643,14 @@ function GameScreen(props: GameScreenProps) {
         <DefeatedBadge state={state} />
       )}
 
-      {/* HUD: province panel + buy toolbar */}
+      {/* HUD: original-style bottom panel */}
       {human && selectedProvince && (
         <ProvinceHud
           state={state}
           province={selectedProvince}
           pending={pendingRef.current}
-          onBuyUnit={(strength) => {
-            pendingRef.current = { kind: "buy", provinceId: selectedProvince.id, strength };
+          onBuyUnit={() => {
+            pendingRef.current = { kind: "buy", provinceId: selectedProvince.id, strength: 1 };
             selectedHexRef.current = -1;
             refreshUi();
           }}
@@ -559,32 +659,47 @@ function GameScreen(props: GameScreenProps) {
             selectedHexRef.current = -1;
             refreshUi();
           }}
-          onCancel={clearSelection}
         />
       )}
 
       {/* Cancel placement banner */}
       {human && (pendingRef.current.kind === "buy" || pendingRef.current.kind === "build") && (
-        <div className="absolute left-1/2 top-20 -translate-x-1/2 flex items-center gap-3 rounded-full bg-slate-900/90 px-4 py-2 ring-1 ring-white/10">
-          <span className="text-sm">Tap a highlighted tile to place</span>
+        <div className="absolute left-1/2 top-16 -translate-x-1/2 flex items-center gap-3 rounded-full bg-[#f0eee3] px-4 py-2 text-[#3a3a33] shadow">
+          <span className="text-sm font-semibold">Tap a highlighted tile</span>
           <button
             type="button"
             onClick={clearSelection}
-            className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold hover:bg-slate-600"
+            className="rounded-full bg-[#3a3a33] px-3 py-1 text-xs font-bold text-[#f0eee3]"
           >
             Cancel
           </button>
         </div>
       )}
 
-      {/* End turn button */}
+      {/* Undo button (original icon), bottom-left */}
+      {human && (
+        <button
+          type="button"
+          onClick={doUndo}
+          disabled={undoRef.current.length === 0}
+          title="Undo (U)"
+          className={`absolute bottom-4 left-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none ${
+            undoRef.current.length === 0 ? "opacity-40" : ""
+          }`}
+        >
+          <img src={ICON_UNDO_URL} alt="Undo" className="h-8 w-8" />
+        </button>
+      )}
+
+      {/* End turn button (original icon), bottom-right */}
       {human && (
         <button
           type="button"
           onClick={doEndTurn}
-          className="absolute bottom-4 right-4 min-h-[52px] rounded-2xl bg-emerald-500 px-6 text-base font-black text-slate-900 shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-400 active:scale-[0.98]"
+          title="End turn (E)"
+          className="absolute bottom-4 right-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none"
         >
-          End turn
+          <img src={ICON_ENDTURN_URL} alt="End turn" className="h-10 w-10" />
         </button>
       )}
 
@@ -617,21 +732,21 @@ function TopBar({
   onMenu: () => void;
 }) {
   const f = state.turn;
-  const color = f < NEUTRAL_FRACTION ? FRACTION_COLORS[f] : "#999";
+  const color = f < NEUTRAL_FRACTION ? ORIGINAL_FRACTION_COLORS[f] : "#999";
   return (
-    <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-2 bg-gradient-to-b from-slate-950/90 to-transparent px-3 py-2">
-      <div className="flex items-center gap-2 rounded-full bg-slate-900/80 px-3 py-1.5 ring-1 ring-white/10">
+    <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-2 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-full bg-[#f0eee3] px-3 py-1.5 text-[#3a3a33] shadow">
         <span
-          className="inline-block h-4 w-4 rounded-full ring-1 ring-white/30"
+          className="inline-block h-4 w-4 rounded-full ring-1 ring-black/30"
           style={{ background: color }}
         />
         <span className="text-sm font-bold">{fractionLabel(state, f)}</span>
-        <span className="text-xs text-slate-400">Round {state.round + 1}</span>
+        <span className="text-xs opacity-60">Round {state.round + 1}</span>
       </div>
       <button
         type="button"
         onClick={onMenu}
-        className="min-h-[40px] rounded-full bg-slate-900/80 px-4 text-sm font-semibold ring-1 ring-white/10 hover:bg-slate-800"
+        className="min-h-[40px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow hover:brightness-95"
       >
         Menu
       </button>
@@ -639,144 +754,110 @@ function TopBar({
   );
 }
 
+/** Original-style bottom strip: coin + money, then picture buttons. */
 function ProvinceHud({
   state,
   province,
   pending,
   onBuyUnit,
   onBuild,
-  onCancel,
 }: {
   state: GameState;
   province: Province;
   pending: Pending;
-  onBuyUnit: (strength: number) => void;
+  onBuyUnit: () => void;
   onBuild: (kind: "farm" | "tower" | "strongTower") => void;
-  onCancel: () => void;
 }) {
   const profit = getProvinceProfit(state, province);
   const farmPrice = getFarmPrice(state, province);
   const money = province.money;
-
-  const unitDefs = [
-    { s: 1, name: "Peasant", price: getUnitPrice(1) },
-    { s: 2, name: "Spearman", price: getUnitPrice(2) },
-    { s: 3, name: "Knight", price: getUnitPrice(3) },
-    { s: 4, name: "Baron", price: getUnitPrice(4) },
-  ];
-
-  const isActive = (test: boolean) => (test ? "ring-2 ring-emerald-400" : "");
+  const unitPrice = getUnitPrice(1);
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 sm:left-2 sm:right-auto sm:top-1/2 sm:bottom-auto sm:w-72 sm:-translate-y-1/2 sm:px-0 sm:pb-0">
-      <div className="rounded-2xl bg-slate-900/90 p-3 ring-1 ring-white/10 backdrop-blur">
-        {/* Money / profit */}
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-amber-300">{money}</span>
-            <span className="text-xs text-slate-400">treasury</span>
-          </div>
-          <span
-            className={`text-sm font-bold ${
-              profit >= 0 ? "text-emerald-400" : "text-red-400"
-            }`}
-          >
-            {profit >= 0 ? `+${profit}` : `${profit}`}/turn
+    <div className="absolute bottom-20 left-1/2 -translate-x-1/2 sm:bottom-4">
+      <div className="flex items-center gap-2 rounded-2xl bg-[#f0eee3] px-3 py-2 text-[#3a3a33] shadow-[0_3px_0_rgba(0,0,0,0.3)]">
+        {/* Money */}
+        <div className="mr-1 flex flex-col items-center px-1">
+          <span className="flex items-center gap-1.5">
+            <img src={ICON_COIN_URL} alt="" className="h-6 w-6" />
+            <span className="text-xl font-black leading-none">{money}</span>
+          </span>
+          <span className={`text-xs font-bold ${profit >= 0 ? "text-[#2c7a2c]" : "text-[#a3322a]"}`}>
+            {profit >= 0 ? `+${profit}` : `${profit}`}
           </span>
         </div>
 
-        {/* Units */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {unitDefs.map((u) => {
-            const disabled = money < u.price;
-            const sel = pending.kind === "buy" && pending.strength === u.s;
-            return (
-              <button
-                key={u.s}
-                type="button"
-                disabled={disabled}
-                onClick={() => onBuyUnit(u.s)}
-                title={u.name}
-                className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg px-1 py-1 text-[11px] font-semibold transition ${isActive(
-                  sel
-                )} ${
-                  disabled
-                    ? "cursor-not-allowed bg-slate-800/60 text-slate-600"
-                    : "bg-slate-700 text-slate-100 hover:bg-slate-600"
-                }`}
-              >
-                <span className="text-sm leading-none">⚔ {u.s}</span>
-                <span className="mt-0.5 text-amber-300/90">{u.price}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Buildings */}
-        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-          <BuildBtn
-            label="Farm"
-            price={farmPrice}
-            disabled={money < farmPrice}
-            active={pending.kind === "build" && pending.buildKind === "farm"}
-            onClick={() => onBuild("farm")}
-          />
-          <BuildBtn
-            label="Tower"
-            price={PRICE_TOWER}
-            disabled={money < PRICE_TOWER}
-            active={pending.kind === "build" && pending.buildKind === "tower"}
-            onClick={() => onBuild("tower")}
-          />
-          <BuildBtn
-            label="S.Tower"
-            price={PRICE_STRONG_TOWER}
-            disabled={money < PRICE_STRONG_TOWER}
-            active={pending.kind === "build" && pending.buildKind === "strongTower"}
-            onClick={() => onBuild("strongTower")}
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick={onCancel}
-          className="mt-2 w-full min-h-[40px] rounded-lg bg-slate-800 text-xs font-semibold text-slate-300 hover:bg-slate-700"
-        >
-          Deselect
-        </button>
+        <SpriteButton
+          sprite="man0"
+          price={unitPrice}
+          disabled={money < unitPrice}
+          active={pending.kind === "buy"}
+          onClick={onBuyUnit}
+          title="Buy unit (stack units to merge)"
+        />
+        <SpriteButton
+          sprite="tower"
+          price={PRICE_TOWER}
+          disabled={money < PRICE_TOWER}
+          active={pending.kind === "build" && pending.buildKind === "tower"}
+          onClick={() => onBuild("tower")}
+          title="Build tower"
+        />
+        <SpriteButton
+          sprite="strong_tower"
+          price={PRICE_STRONG_TOWER}
+          disabled={money < PRICE_STRONG_TOWER}
+          active={pending.kind === "build" && pending.buildKind === "strongTower"}
+          onClick={() => onBuild("strongTower")}
+          title="Build strong tower"
+        />
+        <SpriteButton
+          sprite="farm1"
+          price={farmPrice}
+          disabled={money < farmPrice}
+          active={pending.kind === "build" && pending.buildKind === "farm"}
+          onClick={() => onBuild("farm")}
+          title="Build farm"
+        />
       </div>
     </div>
   );
 }
 
-function BuildBtn({
-  label,
+function SpriteButton({
+  sprite,
   price,
   disabled,
   active,
   onClick,
+  title,
 }: {
-  label: string;
+  sprite: string;
   price: number;
   disabled: boolean;
   active: boolean;
   onClick: () => void;
+  title: string;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex min-h-[44px] flex-col items-center justify-center rounded-lg px-1 text-[11px] font-semibold transition ${
-        active ? "ring-2 ring-emerald-400" : ""
-      } ${
-        disabled
-          ? "cursor-not-allowed bg-slate-800/60 text-slate-600"
-          : "bg-slate-700 text-slate-100 hover:bg-slate-600"
-      }`}
+      title={title}
+      className={`flex min-h-[56px] min-w-[52px] flex-col items-center justify-center rounded-xl px-1 py-1 transition ${
+        active ? "bg-[#3a3a33]" : "bg-[#e2dfc8]"
+      } ${disabled ? "opacity-40" : "hover:brightness-95 active:translate-y-[1px]"}`}
     >
-      <span>{label}</span>
-      <span className="mt-0.5 text-amber-300/90">{price}</span>
+      <Sprite name={sprite} size={34} />
+      <span
+        className={`mt-0.5 flex items-center gap-0.5 text-[11px] font-bold ${
+          active ? "text-[#f0eee3]" : "text-[#3a3a33]"
+        }`}
+      >
+        <img src={ICON_COIN_URL} alt="" className="h-3 w-3" />
+        {price}
+      </span>
     </button>
   );
 }
@@ -788,25 +869,23 @@ function PassScreen({
   fraction: number;
   onContinue: () => void;
 }) {
-  const color = FRACTION_COLORS[fraction] ?? "#999";
+  const color = ORIGINAL_FRACTION_COLORS[fraction] ?? "#999";
   return (
     <main
-      className="flex h-screen w-screen items-center justify-center bg-slate-950 text-slate-100"
+      className="flex h-screen w-screen items-center justify-center"
+      style={{ background: MENU_BACKGROUND_COLOR }}
       onClick={onContinue}
     >
       <div className="flex flex-col items-center gap-5 p-6 text-center">
         <span
-          className="h-16 w-16 rounded-2xl ring-2 ring-white/20"
+          className="h-16 w-16 rounded-2xl ring-2 ring-black/20"
           style={{ background: color }}
         />
-        <h2 className="text-3xl font-black">Player {fraction + 1}</h2>
-        <p className="text-slate-400">Pass the device, then tap to start your turn.</p>
-        <button
-          type="button"
-          className="min-h-[52px] rounded-2xl bg-emerald-500 px-8 text-lg font-black text-slate-900"
-        >
-          Tap to start
-        </button>
+        <h2 className="text-3xl font-black text-[#f0eee3] drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">
+          Player {fraction + 1}
+        </h2>
+        <p className="font-semibold text-[#2e2e28]/80">Pass the device, then tap to start your turn.</p>
+        <MenuButton onClick={onContinue}>Tap to start</MenuButton>
       </div>
     </main>
   );
@@ -821,30 +900,18 @@ function VictoryOverlay({
   onPlayAgain: () => void;
   onMenu: () => void;
 }) {
-  const color = FRACTION_COLORS[winner] ?? "#999";
+  const color = ORIGINAL_FRACTION_COLORS[winner] ?? "#999";
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
-      <div className="flex flex-col items-center gap-5 rounded-3xl bg-slate-900 p-8 text-center ring-1 ring-white/10">
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-5 rounded-3xl bg-[#b3ae7e] p-8 text-center shadow-[0_4px_0_rgba(0,0,0,0.25)]">
         <span
-          className="h-16 w-16 rounded-2xl ring-2 ring-white/30"
+          className="h-16 w-16 rounded-2xl ring-2 ring-black/20"
           style={{ background: color }}
         />
-        <h2 className="text-3xl font-black">Player {winner + 1} wins!</h2>
+        <h2 className="text-3xl font-black text-[#2e2e28]">Player {winner + 1} wins!</h2>
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={onPlayAgain}
-            className="min-h-[48px] rounded-xl bg-emerald-500 px-5 font-black text-slate-900 hover:bg-emerald-400"
-          >
-            Play again
-          </button>
-          <button
-            type="button"
-            onClick={onMenu}
-            className="min-h-[48px] rounded-xl bg-slate-700 px-5 font-bold hover:bg-slate-600"
-          >
-            Menu
-          </button>
+          <MenuButton onClick={onPlayAgain}>Play again</MenuButton>
+          <MenuButton onClick={onMenu}>Menu</MenuButton>
         </div>
       </div>
     </div>
@@ -855,7 +922,7 @@ function DefeatedBadge({ state }: { state: GameState }) {
   const dead = defeatedHumans(state);
   if (dead.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-red-900/80 px-4 py-1.5 text-xs font-semibold text-red-100 ring-1 ring-red-500/30">
+    <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-[#a3322a]/90 px-4 py-1.5 text-xs font-bold text-white shadow">
       {dead.map((f) => `Player ${f + 1}`).join(", ")} defeated
     </div>
   );

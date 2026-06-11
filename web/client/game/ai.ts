@@ -16,7 +16,28 @@ import {
   getUnitPrice,
 } from "./engine";
 import { MAX_UNIT_STRENGTH, NEUTRAL_FRACTION, PRICE_TOWER, UNIT_TAX } from "./constants";
-import type { GameState, HexTile, Province } from "./types";
+import type { Difficulty, GameState, HexTile, Province } from "./types";
+
+interface AiTuning {
+  /** Sweeps over the province list per turn. */
+  passes: number;
+  /** Turns of upkeep a cash pile must cover before deficit-buying a unit. */
+  bufferTaxTurns: number;
+  /** Whether idle units harvest trees and march to the front. */
+  repositioning: boolean;
+  /** Whether the AI invests in towers. */
+  buildsTowers: boolean;
+}
+
+const TUNINGS: Record<Difficulty, AiTuning> = {
+  easy: { passes: 1, bufferTaxTurns: Infinity, repositioning: false, buildsTowers: false },
+  normal: { passes: 2, bufferTaxTurns: 3, repositioning: true, buildsTowers: true },
+  hard: { passes: 4, bufferTaxTurns: 2, repositioning: true, buildsTowers: true },
+};
+
+function tuning(state: GameState): AiTuning {
+  return TUNINGS[state.config.difficulty ?? "normal"];
+}
 
 /** How valuable capturing a hex is. */
 function captureValue(state: GameState, hex: HexTile): number {
@@ -38,7 +59,7 @@ export function aiTakeTurn(state: GameState): void {
   let budget = 500;
 
   // Captures can merge/split provinces mid-turn, so sweep until quiet.
-  for (let pass = 0; pass < 4 && budget > 0; pass++) {
+  for (let pass = 0; pass < tuning(state).passes && budget > 0; pass++) {
     const before = state.version;
     for (const province of getProvincesOf(state, fraction)) {
       // Province list can be invalidated by captures (rebuilds), so re-find it.
@@ -112,6 +133,7 @@ function moveOneUnit(state: GameState, province: Province): boolean {
       const r = applyAction(state, { type: "moveUnit", from: h, to: best });
       if (r.ok) return true;
     }
+    if (!tuning(state).repositioning) continue;
     // No capture available: harvest an own tree in reach (+3 gold, frees
     // the tile's income) before considering a march.
     let treeTarget = -1;
@@ -160,7 +182,8 @@ function buyOneUnit(state: GameState, province: Province): boolean {
     // Don't bankrupt: after upkeep the province must stay solvent — unless
     // a cash pile can fund a wall-breaker for several turns of upkeep.
     const sustainable =
-      profit - UNIT_TAX[strength] >= 0 || province.money >= price + 3 * UNIT_TAX[strength];
+      profit - UNIT_TAX[strength] >= 0 ||
+      province.money >= price + tuning(state).bufferTaxTurns * UNIT_TAX[strength];
     if (!sustainable) continue;
     const zone = getBuyZone(state, province, strength);
     let best = -1;
@@ -186,6 +209,7 @@ function buyOneUnit(state: GameState, province: Province): boolean {
 
 /** Spend surplus on farms (economy) and the odd tower (defense). */
 function buildSomething(state: GameState, province: Province): boolean {
+  const allowTowers = tuning(state).buildsTowers;
   // Farms: strong long-term value, buy whenever comfortably affordable.
   const farmPrice = getFarmPrice(state, province);
   if (province.money >= farmPrice + 10) {
@@ -201,7 +225,7 @@ function buildSomething(state: GameState, province: Province): boolean {
     }
   }
   // Tower: place where it covers the most undefended border tiles.
-  if (province.money >= PRICE_TOWER + 20 && province.hexes.length >= 8) {
+  if (allowTowers && province.money >= PRICE_TOWER + 20 && province.hexes.length >= 8) {
     const spots = getBuildZone(state, province, "tower");
     let best = -1;
     let bestCover = 2; // require covering at least 3 weak tiles to bother
