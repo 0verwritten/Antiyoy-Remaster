@@ -91,6 +91,8 @@ export interface GameState {
   winner: Fraction | null;
   /** Monotonic counter bumped on every applied action (for UI memoization). */
   version: number;
+  /** Deterministic allocator for province identities, including replay reconstruction. */
+  nextProvinceId: number;
 }
 
 /** Actions a player (human or AI) can take. All validated by the engine. */

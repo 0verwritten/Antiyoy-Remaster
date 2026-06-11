@@ -15,9 +15,11 @@ import {
   getProvinceProfit,
   getUnitPrice,
   isHumanTurn,
+  setActionObserver,
+  type ActionEvent,
 } from "./game/engine";
 import { aiTakeTurn } from "./game/ai";
-import type { Difficulty, GameConfig, GameMode, GameState, MapSize, Province } from "./game/types";
+import type { Action, Difficulty, GameConfig, GameMode, GameState, MapSize, Province } from "./game/types";
 import {
   fitToIsland,
   HEX_SIZE,
@@ -30,17 +32,12 @@ import { pixelToHex, type Point } from "./hex";
 import { renderBoard, type RenderState } from "./render";
 import { aiDelayMs, saveSettings, settings } from "./settings";
 import {
-  ATLAS_URL,
   ICON_COIN_URL,
   ICON_ENDTURN_URL,
   ICON_UNDO_URL,
   MENU_BACKGROUND_COLOR,
   ORIGINAL_FRACTION_COLORS,
-  SPRITES,
 } from "./sprites";
-
-const ATLAS_W = 1024;
-const ATLAS_H = 604;
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
 // game lives at antiyoy.lakebed.app only.
@@ -64,35 +61,12 @@ type Pending =
 
 type Screen =
   | { kind: "start" }
-  | { kind: "settings" }
   | { kind: "game" }
   | { kind: "pass"; fraction: number }; // hotseat interstitial
 
 // ---------------------------------------------------------------------------
 // Original-look building blocks
 // ---------------------------------------------------------------------------
-
-/** A sprite from the original field-element atlas, rendered via CSS. */
-function Sprite({ name, size }: { name: string; size: number }) {
-  const r = SPRITES[name];
-  if (!r) return null;
-  const scale = size / r.w;
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-block"
-      style={{
-        width: size,
-        height: size,
-        backgroundImage: `url(${ATLAS_URL})`,
-        backgroundSize: `${ATLAS_W * scale}px ${ATLAS_H * scale}px`,
-        backgroundPosition: `-${r.x * scale}px -${r.y * scale}px`,
-        backgroundRepeat: "no-repeat",
-        imageRendering: "auto",
-      }}
-    />
-  );
-}
 
 /** Big cream rounded button like the original menus. */
 function MenuButton({
@@ -164,16 +138,13 @@ export function App() {
       <StartScreen
         onPlay={startGame}
         initial={configRef.current}
-        onSettings={() => setScreen({ kind: "settings" })}
       />
     );
-  }
-  if (screen.kind === "settings") {
-    return <SettingsScreen onBack={() => setScreen({ kind: "start" })} />;
   }
 
   return (
     <GameScreen
+      key={configRef.current?.seed}
       screen={screen}
       setScreen={setScreen}
       stateRef={stateRef}
@@ -195,17 +166,16 @@ export function App() {
 function StartScreen({
   onPlay,
   initial,
-  onSettings,
 }: {
   onPlay: (config: GameConfig) => void;
   initial: GameConfig | null;
-  onSettings: () => void;
 }) {
   const [mapSize, setMapSize] = useState<MapSize>(initial?.mapSize ?? "medium");
   const [playerCount, setPlayerCount] = useState(initial?.playerCount ?? 2);
   const [humanCount, setHumanCount] = useState(initial?.humanCount ?? 1);
   const [difficulty, setDifficulty] = useState<Difficulty>(initial?.difficulty ?? "normal");
   const [mode, setMode] = useState<GameMode>(initial?.mode ?? "antiyoy");
+  const [, refreshSettings] = useState(0);
 
   const clampedHumans = Math.min(humanCount, playerCount);
 
@@ -218,6 +188,12 @@ function StartScreen({
       difficulty,
       mode,
     });
+  }
+
+  function setSetting<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) {
+    settings[key] = value;
+    saveSettings();
+    refreshSettings((n) => n + 1);
   }
 
   const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
@@ -322,13 +298,52 @@ function StartScreen({
                   Slay
                 </Chip>
               </div>
+              <div className="mt-5 flex flex-col gap-4 border-t border-[#2e2e28]/20 pt-4">
+                <div>
+                  <label className={labelCls}>AI speed</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["slow", "normal", "fast"] as const).map((value) => (
+                      <Chip key={value} selected={settings.aiSpeed === value} onClick={() => setSetting("aiSpeed", value)}>
+                        {value}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Hex outlines</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Chip selected={!settings.showAllBorders} onClick={() => setSetting("showAllBorders", false)}>
+                      Territory borders
+                    </Chip>
+                    <Chip selected={settings.showAllBorders} onClick={() => setSetting("showAllBorders", true)}>
+                      Full grid
+                    </Chip>
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Unit animations</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Chip selected={settings.unitAnimations} onClick={() => setSetting("unitAnimations", true)}>On</Chip>
+                    <Chip selected={!settings.unitAnimations} onClick={() => setSetting("unitAnimations", false)}>Off</Chip>
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Ask before ending turn</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Chip selected={settings.confirmEndTurn} onClick={() => setSetting("confirmEndTurn", true)}>On</Chip>
+                    <Chip selected={!settings.confirmEndTurn} onClick={() => setSetting("confirmEndTurn", false)}>Off</Chip>
+                  </div>
+                </div>
+              </div>
             </div>
           </details>
 
           <MenuButton onClick={play} className="mt-1 text-xl">
             Play
           </MenuButton>
-          <MenuButton onClick={onSettings}>Settings</MenuButton>
         </section>
       </div>
     </main>
@@ -351,8 +366,20 @@ interface GameScreenProps {
 
 const UNDO_STACK_LIMIT = 50;
 
+interface ReplayStep {
+  action: Action;
+  actor: number;
+  moneyDelta: number[];
+}
+
+interface UndoEntry {
+  state: GameState;
+  replayLength: number;
+}
+
 function GameScreen(props: GameScreenProps) {
   const { stateRef, forceRender, setScreen, screen } = props;
+  const state = stateRef.current!;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const camRef = useRef<Camera>(makeCamera());
   const pendingRef = useRef<Pending>({ kind: "none" });
@@ -360,13 +387,29 @@ function GameScreen(props: GameScreenProps) {
   const highlightProvinceRef = useRef<number>(-1);
   const aiThinkingRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(true);
-  const undoRef = useRef<GameState[]>([]);
+  const undoRef = useRef<UndoEntry[]>([]);
   const aliveRef = useRef(true);
+  const replayInitialRef = useRef<GameState>(structuredClone(state));
+  const replayStepsRef = useRef<ReplayStep[]>([]);
+  const [showReplay, setShowReplay] = useState(false);
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
 
-  const state = stateRef.current!;
+  const recordAction = useCallback((event: ActionEvent) => {
+    replayStepsRef.current.push({
+      action: event.action,
+      actor: event.actor,
+      moneyDelta: event.moneyAfter.map((money, fraction) => money - event.moneyBefore[fraction]),
+    });
+  }, []);
+
+  useEffect(() => {
+    const live = stateRef.current;
+    if (!live) return;
+    setActionObserver(live, recordAction);
+    return () => setActionObserver(live, null);
+  }, [stateRef, recordAction]);
 
   // --- camera fit on first mount ---
   const fittedRef = useRef(false);
@@ -437,22 +480,28 @@ function GameScreen(props: GameScreenProps) {
   const pushUndo = useCallback(() => {
     const st = stateRef.current;
     if (!st) return;
-    undoRef.current.push(structuredClone(st));
+    undoRef.current.push({
+      state: structuredClone(st),
+      replayLength: replayStepsRef.current.length,
+    });
     if (undoRef.current.length > UNDO_STACK_LIMIT) undoRef.current.shift();
   }, [stateRef]);
 
   const doUndo = useCallback(() => {
     const st = stateRef.current;
     if (!st || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
-    const prev = undoRef.current.pop();
-    if (!prev) return;
-    stateRef.current = prev;
+    const entry = undoRef.current.pop();
+    if (!entry) return;
+    setActionObserver(st, null);
+    stateRef.current = entry.state;
+    replayStepsRef.current.length = entry.replayLength;
+    setActionObserver(entry.state, recordAction);
     pendingRef.current = { kind: "none" };
     selectedHexRef.current = -1;
     highlightProvinceRef.current = -1;
     forceRender();
     refreshUi();
-  }, [stateRef, forceRender, refreshUi]);
+  }, [stateRef, forceRender, refreshUi, recordAction]);
 
   const runAiIfNeeded = useCallback(() => {
     const st = stateRef.current;
@@ -775,8 +824,17 @@ function GameScreen(props: GameScreenProps) {
         <VictoryOverlay
           label={fractionLabel(state, state.winner)}
           winner={state.winner}
+          onReplay={() => setShowReplay(true)}
           onPlayAgain={props.onPlayAgain}
           onMenu={props.onMenu}
+        />
+      )}
+
+      {showReplay && (
+        <ReplayViewer
+          initialState={replayInitialRef.current}
+          steps={replayStepsRef.current}
+          onClose={() => setShowReplay(false)}
         />
       )}
     </main>
@@ -822,7 +880,7 @@ function TopBar({
   );
 }
 
-/** Original-style bottom strip: coin + money, then picture buttons. */
+/** Compact bottom purchase panel with native mobile-friendly selectors. */
 function ProvinceHud({
   state,
   province,
@@ -841,7 +899,7 @@ function ProvinceHud({
   const money = province.money;
 
   return (
-    <div className="absolute bottom-20 left-1/2 w-[calc(100%-1rem)] max-w-[570px] -translate-x-1/2 sm:bottom-4 sm:w-auto">
+    <div className="absolute bottom-20 left-1/2 w-[calc(100%-1rem)] max-w-md -translate-x-1/2 sm:bottom-4">
       <div className="rounded-2xl bg-[#f0eee3] p-2 text-[#3a3a33] shadow-[0_3px_0_rgba(0,0,0,0.3)] sm:flex sm:items-center sm:gap-2 sm:px-3">
         {/* Money */}
         <div className="mb-1 flex items-center justify-center gap-2 px-1 sm:mb-0 sm:mr-1 sm:flex-col sm:gap-0">
@@ -854,164 +912,55 @@ function ProvinceHud({
           </span>
         </div>
 
-        <div className="grid grid-cols-7 gap-1 sm:flex sm:gap-2">
-          {[1, 2, 3, 4].map((strength) => (
-            <SpriteButton
-              key={strength}
-              sprite={"man" + (strength - 1)}
-              price={getUnitPrice(strength)}
-              disabled={money < getUnitPrice(strength)}
-              active={pending.kind === "buy" && pending.strength === strength}
-              onClick={() => onBuyUnit(strength)}
-              title={"Buy unit " + strength + " (stack units to merge)"}
-            />
-          ))}
-          <SpriteButton
-            sprite="tower"
-            price={PRICE_TOWER}
-            disabled={money < PRICE_TOWER}
-            active={pending.kind === "build" && pending.buildKind === "tower"}
-            onClick={() => onBuild("tower")}
-            title="Build tower"
-          />
-          <SpriteButton
-            sprite="strong_tower"
-            price={PRICE_STRONG_TOWER}
-            disabled={money < PRICE_STRONG_TOWER}
-            active={pending.kind === "build" && pending.buildKind === "strongTower"}
-            onClick={() => onBuild("strongTower")}
-            title="Build strong tower"
-          />
-          <SpriteButton
-            sprite="farm1"
-            price={farmPrice}
-            disabled={money < farmPrice}
-            active={pending.kind === "build" && pending.buildKind === "farm"}
-            onClick={() => onBuild("farm")}
-            title="Build farm"
-          />
+        <div className="grid grid-cols-2 gap-2 sm:flex-1">
+          <label className="min-w-0">
+            <span className="sr-only">Select warrior</span>
+            <select
+              aria-label="Select warrior"
+              value={pending.kind === "buy" ? String(pending.strength) : ""}
+              onChange={(event) => {
+                const strength = Number(event.currentTarget.value);
+                if (strength) onBuyUnit(strength);
+              }}
+              className="min-h-[48px] w-full rounded-xl bg-[#e2dfc8] px-3 text-sm font-bold text-[#3a3a33] outline-none ring-[#3a3a33] focus:ring-2"
+            >
+              <option value="">Warriors</option>
+              {[1, 2, 3, 4].map((strength) => {
+                const price = getUnitPrice(strength);
+                return (
+                  <option key={strength} value={strength} disabled={money < price}>
+                    Warrior {strength} - {price}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+
+          <label className="min-w-0">
+            <span className="sr-only">Select building</span>
+            <select
+              aria-label="Select building"
+              value={pending.kind === "build" ? pending.buildKind : ""}
+              onChange={(event) => {
+                const kind = event.currentTarget.value;
+                if (kind === "farm" || kind === "tower" || kind === "strongTower") onBuild(kind);
+              }}
+              className="min-h-[48px] w-full rounded-xl bg-[#e2dfc8] px-3 text-sm font-bold text-[#3a3a33] outline-none ring-[#3a3a33] focus:ring-2"
+            >
+              <option value="">Buildings</option>
+              <option value="farm" disabled={money < farmPrice}>Farm - {farmPrice}</option>
+              <option value="tower" disabled={money < PRICE_TOWER}>Tower - {PRICE_TOWER}</option>
+              <option value="strongTower" disabled={money < PRICE_STRONG_TOWER}>
+                Strong tower - {PRICE_STRONG_TOWER}
+              </option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
   );
 }
 
-function SpriteButton({
-  sprite,
-  price,
-  disabled,
-  active,
-  onClick,
-  title,
-}: {
-  sprite: string;
-  price: number;
-  disabled: boolean;
-  active: boolean;
-  onClick: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-      className={`flex min-h-[50px] min-w-0 flex-col items-center justify-center rounded-lg px-0.5 py-0.5 transition sm:min-h-[56px] sm:min-w-[52px] sm:rounded-xl sm:px-1 sm:py-1 ${
-        active ? "bg-[#3a3a33]" : "bg-[#e2dfc8]"
-      } ${disabled ? "opacity-40" : "hover:brightness-95 active:translate-y-[1px]"}`}
-    >
-      <Sprite name={sprite} size={30} />
-      <span
-        className={`mt-0.5 flex items-center gap-0.5 text-[11px] font-bold ${
-          active ? "text-[#f0eee3]" : "text-[#3a3a33]"
-        }`}
-      >
-        <img src={ICON_COIN_URL} alt="" className="h-3 w-3" />
-        {price}
-      </span>
-    </button>
-  );
-}
-
-
-function SettingsScreen({ onBack }: { onBack: () => void }) {
-  const [, bump] = useState(0);
-  const refresh = () => bump((n) => n + 1);
-  const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
-
-  function set<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) {
-    settings[key] = value;
-    saveSettings();
-    refresh();
-  }
-
-  return (
-    <main
-      className="min-h-screen w-full flex items-center justify-center p-5"
-      style={{ background: MENU_BACKGROUND_COLOR }}
-    >
-      <div className="w-full max-w-md flex flex-col gap-6">
-        <header className="text-center">
-          <h1 className="text-4xl font-black tracking-tight text-[#f0eee3] drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">
-            Settings
-          </h1>
-        </header>
-
-        <section className="flex flex-col gap-5 rounded-3xl bg-[#b3ae7e] p-5 shadow-[0_4px_0_rgba(0,0,0,0.2)]">
-          <div>
-            <label className={labelCls}>AI speed</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["slow", "normal", "fast"] as const).map((v) => (
-                <Chip key={v} selected={settings.aiSpeed === v} onClick={() => set("aiSpeed", v)}>
-                  {v}
-                </Chip>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Hex outlines</label>
-            <div className="grid grid-cols-2 gap-2">
-              <Chip selected={!settings.showAllBorders} onClick={() => set("showAllBorders", false)}>
-                Territory borders
-              </Chip>
-              <Chip selected={settings.showAllBorders} onClick={() => set("showAllBorders", true)}>
-                Full grid
-              </Chip>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Unit animations</label>
-            <div className="grid grid-cols-2 gap-2">
-              <Chip selected={settings.unitAnimations} onClick={() => set("unitAnimations", true)}>
-                On
-              </Chip>
-              <Chip selected={!settings.unitAnimations} onClick={() => set("unitAnimations", false)}>
-                Off
-              </Chip>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Ask before ending turn</label>
-            <div className="grid grid-cols-2 gap-2">
-              <Chip selected={settings.confirmEndTurn} onClick={() => set("confirmEndTurn", true)}>
-                On
-              </Chip>
-              <Chip selected={!settings.confirmEndTurn} onClick={() => set("confirmEndTurn", false)}>
-                Off
-              </Chip>
-            </div>
-          </div>
-
-          <MenuButton onClick={onBack}>Back</MenuButton>
-        </section>
-      </div>
-    </main>
-  );
-}
 
 function PassScreen({
   fraction,
@@ -1045,11 +994,13 @@ function PassScreen({
 function VictoryOverlay({
   label,
   winner,
+  onReplay,
   onPlayAgain,
   onMenu,
 }: {
   label: string;
   winner: number;
+  onReplay: () => void;
   onPlayAgain: () => void;
   onMenu: () => void;
 }) {
@@ -1062,13 +1013,195 @@ function VictoryOverlay({
           style={{ background: color }}
         />
         <h2 className="text-3xl font-black text-[#2e2e28]">{label} wins!</h2>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap justify-center gap-3">
+          <MenuButton onClick={onReplay}>Replay</MenuButton>
           <MenuButton onClick={onPlayAgain}>Play again</MenuButton>
           <MenuButton onClick={onMenu}>Menu</MenuButton>
         </div>
       </div>
     </div>
   );
+}
+
+function ReplayViewer({
+  initialState,
+  steps,
+  onClose,
+}: {
+  initialState: GameState;
+  steps: ReplayStep[];
+  onClose: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stateRef = useRef<GameState>(structuredClone(initialState));
+  const cameraRef = useRef<Camera>(makeCamera());
+  const fittedRef = useRef(false);
+  const stepRef = useRef(0);
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  const goTo = useCallback((target: number) => {
+    const clamped = Math.max(0, Math.min(steps.length, target));
+    if (clamped === stepRef.current) return;
+    if (clamped === stepRef.current + 1) {
+      applyAction(stateRef.current, steps[clamped - 1].action);
+    } else {
+      const replayState = structuredClone(initialState);
+      for (let i = 0; i < clamped; i++) applyAction(replayState, steps[i].action);
+      stateRef.current = replayState;
+    }
+    stepRef.current = clamped;
+    setStep(clamped);
+  }, [initialState, steps]);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (step >= steps.length) {
+      setPlaying(false);
+      return;
+    }
+    const timer = window.setTimeout(() => goTo(step + 1), 650);
+    return () => window.clearTimeout(timer);
+  }, [playing, step, steps.length, goTo]);
+
+  useEffect(() => {
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = canvas.clientWidth;
+      const cssH = canvas.clientHeight;
+      const wantW = Math.round(cssW * dpr);
+      const wantH = Math.round(cssH * dpr);
+      if (canvas.width !== wantW || canvas.height !== wantH) {
+        canvas.width = wantW;
+        canvas.height = wantH;
+        fittedRef.current = false;
+      }
+      if (!fittedRef.current && cssW > 0 && cssH > 0) {
+        cameraRef.current = fitToIsland(stateRef.current, cssW, cssH, HEX_SIZE);
+        fittedRef.current = true;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderBoard(ctx, stateRef.current, cameraRef.current, {
+        selectedHex: -1,
+        highlightProvince: -1,
+        zone: null,
+        dimNonZone: false,
+        now: performance.now(),
+      }, cssW, cssH);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const current = step > 0 ? steps[step - 1] : null;
+  const replayState = stateRef.current;
+
+  return (
+    <div className="absolute inset-0 z-30 overflow-hidden bg-[#2a628f] text-[#3a3a33]">
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+
+      <div className="absolute left-2 right-2 top-2 flex items-start justify-between gap-2">
+        <div className="max-w-[calc(100%-76px)] rounded-2xl bg-[#f0eee3] px-3 py-2 shadow">
+          <div className="text-sm font-black">
+            Step {step} / {steps.length}
+          </div>
+          <div className="truncate text-xs font-semibold opacity-70">
+            {current ? `Player ${current.actor + 1}: ${replayActionLabel(current.action)}` : "Game start"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="min-h-[44px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold shadow"
+        >
+          Close
+        </button>
+      </div>
+
+      <div className="absolute bottom-24 left-2 right-2 rounded-2xl bg-[#f0eee3] p-3 shadow-[0_3px_0_rgba(0,0,0,0.3)] sm:bottom-4 sm:left-1/2 sm:right-auto sm:w-[min(560px,calc(100%-2rem))] sm:-translate-x-1/2">
+        <div className="mb-2 text-xs font-black uppercase tracking-wide opacity-70">Money earned / spent this step</div>
+        <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+          {Array.from({ length: initialState.config.playerCount }, (_, fraction) => {
+            const delta = current?.moneyDelta[fraction] ?? 0;
+            return (
+              <div key={fraction} className="flex items-center justify-between rounded-lg bg-[#e2dfc8] px-2 py-1 text-xs font-bold">
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="h-3 w-3 rounded-full ring-1 ring-black/20"
+                    style={{ background: ORIGINAL_FRACTION_COLORS[fraction] }}
+                  />
+                  P{fraction + 1}
+                </span>
+                <span className={delta > 0 ? "text-[#2c7a2c]" : delta < 0 ? "text-[#a3322a]" : "opacity-50"}>
+                  {delta > 0 ? `+${delta}` : delta}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <input
+          type="range"
+          min="0"
+          max={steps.length}
+          value={step}
+          aria-label="Replay step"
+          onInput={(event) => {
+            setPlaying(false);
+            goTo(Number(event.currentTarget.value));
+          }}
+          className="mb-3 w-full cursor-pointer accent-[#3a3a33]"
+        />
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            disabled={step === 0}
+            onClick={() => { setPlaying(false); goTo(step - 1); }}
+            className="min-h-[44px] rounded-xl bg-[#e2dfc8] text-sm font-bold disabled:opacity-40"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={steps.length === 0}
+            onClick={() => {
+              if (step >= steps.length) goTo(0);
+              setPlaying((value) => !value);
+            }}
+            className="min-h-[44px] rounded-xl bg-[#3a3a33] text-sm font-bold text-[#f0eee3] disabled:opacity-40"
+          >
+            {playing ? "Pause" : step >= steps.length ? "Restart" : "Play"}
+          </button>
+          <button
+            type="button"
+            disabled={step >= steps.length}
+            onClick={() => { setPlaying(false); goTo(step + 1); }}
+            className="min-h-[44px] rounded-xl bg-[#e2dfc8] text-sm font-bold disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+        <div className="mt-2 text-center text-[11px] font-semibold opacity-60">
+          {replayState.winner === null
+            ? `Round ${replayState.round + 1}, Player ${replayState.turn + 1}'s turn`
+            : `Player ${replayState.winner + 1} won`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function replayActionLabel(action: Action): string {
+  if (action.type === "endTurn") return "ended turn";
+  if (action.type === "moveUnit") return "moved a warrior";
+  if (action.type === "buyUnit") return `bought warrior ${action.strength}`;
+  return `built ${action.kind === "strongTower" ? "strong tower" : action.kind}`;
 }
 
 function DefeatedBadge({ state }: { state: GameState }) {

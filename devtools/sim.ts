@@ -1,9 +1,10 @@
 // Headless engine/AI verification: runs AI-vs-AI games in both modes and
 // checks invariants. Run from repo root: npx tsx devtools/sim.ts
-import { createGame } from "../web/client/game/engine";
+import { applyAction, createGame, setActionObserver } from "../web/client/game/engine";
 import { aiTakeTurn } from "../web/client/game/ai";
 import { NEUTRAL_FRACTION } from "../web/client/game/constants";
 import type { GameState } from "../web/client/game/types";
+import type { Action } from "../web/client/game/types";
 
 function check(state: GameState, label: string) {
   const seen = new Set<number>();
@@ -36,6 +37,9 @@ for (const mode of ["antiyoy", "slay"] as const) {
       seed: 500 + t * 13,
       mode,
     });
+    const replayStart = structuredClone(st);
+    const replayActions: Action[] = [];
+    setActionObserver(st, (event) => replayActions.push(event.action));
     check(st, `${mode} init`);
     const neutral = st.hexes.filter((h) => h.active && h.fraction === NEUTRAL_FRACTION).length;
     let guard = 0;
@@ -44,6 +48,14 @@ for (const mode of ["antiyoy", "slay"] as const) {
       if (guard % 15 === 0) check(st, `${mode} r${st.round}`);
     }
     check(st, `${mode} end`);
+    const replayed = structuredClone(replayStart);
+    for (const action of replayActions) {
+      const result = applyAction(replayed, action);
+      if (!result.ok) throw new Error(`${mode} replay failed: ${result.reason}`);
+    }
+    if (JSON.stringify(replayed) !== JSON.stringify(st)) {
+      throw new Error(`${mode} ${players}p replay diverged from recorded game`);
+    }
     console.log(
       `${mode} ${players}p: neutral@start=${neutral}, rounds=${st.round}, winner=${
         st.winner === null ? "none (stalemate!)" : "P" + st.winner

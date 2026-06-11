@@ -34,6 +34,27 @@ import type {
   Province,
 } from "./types";
 
+export interface ActionEvent {
+  action: Action;
+  actor: Fraction;
+  moneyBefore: number[];
+  moneyAfter: number[];
+}
+
+const actionObservers = new WeakMap<GameState, (event: ActionEvent) => void>();
+
+/** Observe successful actions on one live game state (used by replay recording). */
+export function setActionObserver(state: GameState, observer: ((event: ActionEvent) => void) | null) {
+  if (observer) actionObservers.set(state, observer);
+  else actionObservers.delete(state);
+}
+
+function playerMoney(state: GameState): number[] {
+  const totals = new Array(state.config.playerCount).fill(0);
+  for (const province of state.provinces) totals[province.fraction] += province.money;
+  return totals;
+}
+
 // ---------------------------------------------------------------- RNG
 
 /** Mulberry32 — deterministic, state lives in GameState.rngState. */
@@ -118,6 +139,7 @@ export function createGame(config: GameConfig): GameState {
     alive: new Array(config.playerCount).fill(true),
     winner: null,
     version: 0,
+    nextProvinceId: 1,
   };
 
   generateMap(state); // original Antiyoy island + province generator
@@ -127,8 +149,6 @@ export function createGame(config: GameConfig): GameState {
 }
 
 // ---------------------------------------------------------------- Provinces
-
-let nextProvinceId = 1;
 
 /** Recompute provinces from scratch. With init=true, gives starting money + capitals. */
 function rebuildAllProvinces(state: GameState, init: boolean) {
@@ -160,7 +180,7 @@ function rebuildAllProvinces(state: GameState, init: boolean) {
       continue;
     }
     const province: Province = {
-      id: nextProvinceId++,
+      id: state.nextProvinceId++,
       fraction: hex.fraction,
       hexes: component,
       money: init ? INITIAL_PROVINCE_MONEY : 0,
@@ -400,6 +420,8 @@ export function getBuildZone(
 
 export function applyAction(state: GameState, action: Action): ActionResult {
   if (state.winner !== null) return { ok: false, reason: "game over" };
+  const actor = state.turn;
+  const moneyBefore = playerMoney(state);
   let result: ActionResult;
   switch (action.type) {
     case "moveUnit":
@@ -415,7 +437,15 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       result = doEndTurn(state);
       break;
   }
-  if (result.ok) state.version++;
+  if (result.ok) {
+    state.version++;
+    actionObservers.get(state)?.({
+      action: structuredClone(action),
+      actor,
+      moneyBefore,
+      moneyAfter: playerMoney(state),
+    });
+  }
   return result;
 }
 
