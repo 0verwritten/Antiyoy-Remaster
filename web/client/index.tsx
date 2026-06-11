@@ -271,11 +271,11 @@ function StartScreen({
             <label className={labelCls}>
               Humans: {clampedHumans}{" "}
               <span className="font-normal opacity-60">
-                {clampedHumans === 1 ? "(vs AI)" : "(pass & play)"}
+                {clampedHumans === 0 ? "(watch AI)" : clampedHumans === 1 ? "(vs AI)" : "(pass & play)"}
               </span>
             </label>
             <div className="flex flex-wrap gap-2">
-              {Array.from({ length: playerCount }, (_, i) => i + 1).map((n) => (
+              {Array.from({ length: playerCount + 1 }, (_, i) => i).map((n) => (
                 <Chip key={n} selected={clampedHumans === n} onClick={() => setHumanCount(n)}>
                   {n}
                 </Chip>
@@ -347,6 +347,7 @@ function GameScreen(props: GameScreenProps) {
   const aiThinkingRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(true);
   const undoRef = useRef<GameState[]>([]);
+  const aliveRef = useRef(true);
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -355,6 +356,14 @@ function GameScreen(props: GameScreenProps) {
 
   // --- camera fit on first mount ---
   const fittedRef = useRef(false);
+
+  // Track unmount so a pending AI chain stops with the screen.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   // --- rAF render loop ---
   useEffect(() => {
@@ -448,11 +457,16 @@ function GameScreen(props: GameScreenProps) {
       return;
     }
     // AI turn(s): chain with delays so progress is visible.
+    if (aiThinkingRef.current) return; // a chain is already running
     aiThinkingRef.current = true;
+    const chainState = st;
     refreshUi();
     const step = () => {
       const s = stateRef.current;
-      if (!s) return;
+      if (!s || s !== chainState || !aliveRef.current) {
+        aiThinkingRef.current = false;
+        return;
+      }
       if (s.winner !== null || isHumanTurn(s)) {
         aiThinkingRef.current = false;
         if (s.winner === null && s.config.humanCount >= 2 && isHumanTurn(s)) {
@@ -469,6 +483,12 @@ function GameScreen(props: GameScreenProps) {
     };
     setTimeout(step, aiDelayMs());
   }, [stateRef, forceRender, refreshUi, setScreen]);
+
+  // Spectator games (humanCount 0) and AI-first setups need the chain to
+  // start on its own; re-arm whenever a new game begins.
+  useEffect(() => {
+    if (state && state.winner === null && !isHumanTurn(state)) runAiIfNeeded();
+  }, [state, runAiIfNeeded]);
 
   const doEndTurn = useCallback(() => {
     const st = stateRef.current;
@@ -739,6 +759,7 @@ function GameScreen(props: GameScreenProps) {
       {/* Victory overlay */}
       {state.winner !== null && (
         <VictoryOverlay
+          label={fractionLabel(state, state.winner)}
           winner={state.winner}
           onPlayAgain={props.onPlayAgain}
           onMenu={props.onMenu}
@@ -1006,10 +1027,12 @@ function PassScreen({
 }
 
 function VictoryOverlay({
+  label,
   winner,
   onPlayAgain,
   onMenu,
 }: {
+  label: string;
   winner: number;
   onPlayAgain: () => void;
   onMenu: () => void;
@@ -1022,7 +1045,7 @@ function VictoryOverlay({
           className="h-16 w-16 rounded-2xl ring-2 ring-black/20"
           style={{ background: color }}
         />
-        <h2 className="text-3xl font-black text-[#2e2e28]">Player {winner + 1} wins!</h2>
+        <h2 className="text-3xl font-black text-[#2e2e28]">{label} wins!</h2>
         <div className="flex gap-3">
           <MenuButton onClick={onPlayAgain}>Play again</MenuButton>
           <MenuButton onClick={onMenu}>Menu</MenuButton>

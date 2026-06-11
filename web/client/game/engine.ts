@@ -9,7 +9,6 @@ import {
   FARM_INCOME,
   INITIAL_PROVINCE_MONEY,
   MAP_GRID,
-  MAP_SIZE_TILES,
   MAX_UNIT_STRENGTH,
   NEUTRAL_FRACTION,
   PALM_SPREAD_CHANCE,
@@ -24,6 +23,7 @@ import {
   UNIT_MOVE_LIMIT,
   UNIT_TAX,
 } from "./constants";
+import { generateMap } from "./mapgen";
 import type {
   Action,
   ActionResult,
@@ -108,7 +108,6 @@ export function isNearWater(state: GameState, hex: HexTile): boolean {
 
 export function createGame(config: GameConfig): GameState {
   const grid = MAP_GRID[config.mapSize];
-  const targetTiles = MAP_SIZE_TILES[config.mapSize];
   const state: GameState = {
     config,
     hexes: buildGrid(grid.w, grid.h),
@@ -121,133 +120,10 @@ export function createGame(config: GameConfig): GameState {
     version: 0,
   };
 
-  growIsland(state, targetTiles, grid);
-  if ((config.mode ?? "antiyoy") === "slay") {
-    assignFractionsSlay(state);
-  } else {
-    assignStartingProvinces(state);
-  }
+  generateMap(state); // original Antiyoy island + province generator
   rebuildAllProvinces(state, true);
-  sprinkleTrees(state);
   beginTurn(state); // income for player 0
   return state;
-}
-
-function growIsland(state: GameState, target: number, grid: { w: number; h: number }) {
-  const centerR = Math.floor(grid.h / 2);
-  const centerCol = Math.floor(grid.w / 2);
-  const centerIdx = centerR * grid.w + centerCol;
-  const frontier: number[] = [centerIdx];
-  state.hexes[centerIdx].active = true;
-  let count = 1;
-  while (count < target && frontier.length > 0) {
-    const pick = randomInt(state, frontier.length);
-    const hex = state.hexes[frontier[pick]];
-    const candidates = hex.neighbors.filter((n) => !state.hexes[n].active);
-    if (candidates.length === 0) {
-      frontier.splice(pick, 1);
-      continue;
-    }
-    const grown = candidates[randomInt(state, candidates.length)];
-    state.hexes[grown].active = true;
-    frontier.push(grown);
-    count++;
-  }
-  // Fill single-hex lakes to avoid degenerate coastlines.
-  for (const hex of state.hexes) {
-    if (hex.active) continue;
-    const act = hex.neighbors.filter((n) => state.hexes[n].active).length;
-    if (hex.neighbors.length === 6 && act === 6) {
-      hex.active = true;
-    }
-  }
-}
-
-/**
- * Antiyoy mode: each player starts with one small province; the rest of the
- * island stays neutral and has to be conquered.
- */
-function assignStartingProvinces(state: GameState) {
-  const active = state.hexes.filter((h) => h.active);
-  const players = state.config.playerCount;
-  const seeds: HexTile[] = [];
-  for (let p = 0; p < players; p++) {
-    // Farthest-point sampling so starts are spread across the island.
-    let best: HexTile | null = null;
-    let bestDist = -1;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const cand = active[randomInt(state, active.length)];
-      let minDist = Infinity;
-      for (const s of seeds) minDist = Math.min(minDist, hexDistance(cand, s));
-      if (seeds.length === 0) minDist = 100 + randomInt(state, 10);
-      if (minDist > bestDist) {
-        bestDist = minDist;
-        best = cand;
-      }
-    }
-    seeds.push(best!);
-  }
-  const START_BLOB = 4;
-  for (let p = 0; p < players; p++) {
-    let current = seeds[p];
-    current.fraction = p;
-    for (let i = 1; i < START_BLOB; i++) {
-      const free = activeNeighbors(state, current).filter(
-        (n) => n.fraction === NEUTRAL_FRACTION
-      );
-      if (free.length === 0) break;
-      current = free[randomInt(state, free.length)];
-      current.fraction = p;
-    }
-  }
-}
-
-function hexDistance(a: HexTile, b: HexTile): number {
-  const dq = a.q - b.q;
-  const dr = a.r - b.r;
-  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
-}
-
-/**
- * Slay mode: divide the whole island into small interleaved patches (2-4
- * hexes) so every player starts with several small provinces.
- */
-function assignFractionsSlay(state: GameState) {
-  const active = state.hexes.filter((h) => h.active);
-  const players = state.config.playerCount;
-  // Shuffle active hexes (Fisher-Yates with the seeded RNG).
-  const order = [...active];
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = randomInt(state, i + 1);
-    [order[i], order[j]] = [order[j], order[i]];
-  }
-  let nextFraction = randomInt(state, players);
-  for (const start of order) {
-    if (start.fraction !== NEUTRAL_FRACTION) continue;
-    const fraction = nextFraction;
-    nextFraction = (nextFraction + 1) % players; // round-robin keeps it fair
-    const blobSize = 2 + randomInt(state, 3);
-    let current = start;
-    current.fraction = fraction;
-    for (let i = 1; i < blobSize; i++) {
-      const free = activeNeighbors(state, current).filter((n) => n.fraction === NEUTRAL_FRACTION);
-      if (free.length === 0) break;
-      current = free[randomInt(state, free.length)];
-      current.fraction = fraction;
-    }
-  }
-}
-
-function sprinkleTrees(state: GameState) {
-  for (const hex of state.hexes) {
-    if (!hex.active || hex.obj !== "none" || hex.unit) continue;
-    const roll = nextRandom(state);
-    if (isNearWater(state, hex)) {
-      if (roll < 0.1) hex.obj = "palm";
-    } else if (roll < 0.12) {
-      hex.obj = "pine";
-    }
-  }
 }
 
 // ---------------------------------------------------------------- Provinces
