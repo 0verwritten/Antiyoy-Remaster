@@ -12,6 +12,7 @@ const LONG_PRESS_MS = 500; // original GameController.marchDelay
 export function usePointerControls(
   canvasRef: { current: HTMLCanvasElement | null },
   camRef: { current: Camera },
+  constrainCamera: (camera: Camera) => Camera,
   onChange: () => void,
   onTap: (screenPt: Point) => void,
   blocked: () => boolean,
@@ -87,11 +88,11 @@ export function usePointerControls(
         movedDist += Math.hypot(dx, dy);
         if (movedDist >= 6) cancelLongPress();
         if (!blocked()) {
-          camRef.current = {
+          camRef.current = constrainCamera({
             ...camRef.current,
             x: camRef.current.x - (dx * sens) / camRef.current.scale,
             y: camRef.current.y - (dy * sens) / camRef.current.scale,
-          };
+          });
           onChange();
         }
         lastSingle = p;
@@ -107,7 +108,7 @@ export function usePointerControls(
             x: cam.x - ((mid.x - pinchMid.x) * sens) / cam.scale,
             y: cam.y - ((mid.y - pinchMid.y) * sens) / cam.scale,
           };
-          camRef.current = zoomAt(movedCam, mid, d / pinchDist);
+          camRef.current = constrainCamera(zoomAt(movedCam, mid, d / pinchDist));
           onChange();
         }
         pinchDist = d;
@@ -157,7 +158,7 @@ export function usePointerControls(
           : 1;
       const delta = Math.max(-240, Math.min(240, e.deltaY * unit));
       const factor = Math.exp(-delta * 0.0015 * (settings.cameraSensitivity || 1));
-      camRef.current = zoomAt(camRef.current, pivot, factor);
+      camRef.current = constrainCamera(zoomAt(camRef.current, pivot, factor));
       onChange();
     };
 
@@ -174,7 +175,7 @@ export function usePointerControls(
       canvas.removeEventListener("pointercancel", onCancel);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [canvasRef, camRef, onChange, onTap, blocked, onLongPress]);
+  }, [canvasRef, camRef, constrainCamera, onChange, onTap, blocked, onLongPress]);
 }
 
 function dist(a: Point, b: Point): number {

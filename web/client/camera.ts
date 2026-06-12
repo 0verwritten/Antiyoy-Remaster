@@ -2,7 +2,7 @@
 // Screen = (world - offset) * scale, all in CSS pixels.
 
 import type { GameState } from "./game/types";
-import { islandBounds, type Point } from "./hex";
+import { hexToPixel, islandBounds, type Point } from "./hex";
 
 export const HEX_SIZE = 32; // world-space hex circumradius used for layout
 
@@ -42,6 +42,47 @@ export function zoomAt(cam: Camera, screenPivot: Point, factor: number): Camera 
   next.x += worldBefore.x - worldAfter.x;
   next.y += worldBefore.y - worldAfter.y;
   return next;
+}
+
+/** Keep the camera where at least one active hex is fully inside the viewport. */
+export function clampToIsland(
+  state: GameState,
+  cam: Camera,
+  viewW: number,
+  viewH: number,
+  size: number
+): Camera {
+  if (viewW <= 0 || viewH <= 0) return cam;
+
+  const worldW = viewW / cam.scale;
+  const worldH = viewH / cam.scale;
+  let bestX = cam.x;
+  let bestY = cam.y;
+  let bestDistance = Infinity;
+
+  for (const hex of state.hexes) {
+    if (!hex.active) continue;
+    const center = hexToPixel(hex.q, hex.r, size);
+    const minX = center.x + size - worldW;
+    const maxX = center.x - size;
+    const minY = center.y + size - worldH;
+    const maxY = center.y - size;
+    const x = clampToRange(cam.x, minX, maxX);
+    const y = clampToRange(cam.y, minY, maxY);
+    const distance = (x - cam.x) ** 2 + (y - cam.y) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestX = x;
+      bestY = y;
+    }
+  }
+
+  return bestDistance < Infinity ? { ...cam, x: bestX, y: bestY } : cam;
+}
+
+function clampToRange(value: number, min: number, max: number): number {
+  if (min > max) return (min + max) / 2;
+  return Math.max(min, Math.min(max, value));
 }
 
 /** Fit the whole island into the viewport with some padding. */

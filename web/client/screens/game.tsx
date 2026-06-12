@@ -20,7 +20,7 @@ import {
 } from "../game/engine";
 import { aiTakeTurn } from "../game/ai";
 import type { GameConfig, GameState, Province } from "../game/types";
-import { fitToIsland, HEX_SIZE, makeCamera, screenToWorld, zoomAt, type Camera } from "../camera";
+import { clampToIsland, fitToIsland, HEX_SIZE, makeCamera, screenToWorld, zoomAt, type Camera } from "../camera";
 import { pixelToHex, type Point } from "../hex";
 import { renderBoard, type RenderState } from "../render";
 import { aiDelayMs, settings } from "../settings";
@@ -133,6 +133,9 @@ export function GameScreen(props: GameScreenProps) {
       if (canvas.width !== wantW || canvas.height !== wantH) {
         canvas.width = wantW;
         canvas.height = wantH;
+        if (fittedRef.current) {
+          camRef.current = clampToIsland(st, camRef.current, cssW, cssH, HEX_SIZE);
+        }
         dirtyRef.current = true;
       }
       if (!fittedRef.current && cssW > 0 && cssH > 0) {
@@ -196,16 +199,23 @@ export function GameScreen(props: GameScreenProps) {
     refreshUi();
   }, [stateRef, forceRender, refreshUi, recordAction]);
 
+  const constrainCamera = useCallback((camera: Camera) => {
+    const canvas = canvasRef.current;
+    const st = stateRef.current;
+    if (!canvas || !st) return camera;
+    return clampToIsland(st, camera, canvas.clientWidth, canvas.clientHeight, HEX_SIZE);
+  }, [stateRef]);
+
   const zoomCamera = useCallback((factor: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    camRef.current = zoomAt(
+    camRef.current = constrainCamera(zoomAt(
       camRef.current,
       { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
       factor
-    );
+    ));
     dirtyRef.current = true;
-  }, []);
+  }, [constrainCamera]);
 
   const fitCamera = useCallback(() => {
     const canvas = canvasRef.current;
@@ -328,6 +338,7 @@ export function GameScreen(props: GameScreenProps) {
   usePointerControls(
     canvasRef,
     camRef,
+    constrainCamera,
     () => {
       dirtyRef.current = true;
     },
@@ -543,7 +554,7 @@ export function GameScreen(props: GameScreenProps) {
     <main className="relative h-screen w-screen overflow-hidden bg-[#2a628f] text-slate-100 select-none">
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 h-full w-full"
+        className="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing"
         style={{ touchAction: "none" }}
       />
 
