@@ -84,7 +84,6 @@ export function App() {
         <SkirmishScreen
           onPlay={startGame}
           onBack={() => setScreen({ kind: "main" })}
-          initial={configRef.current}
         />
       );
     case "settings":

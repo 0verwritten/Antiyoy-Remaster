@@ -39,6 +39,7 @@ export const MAP_SIZE_TILES: Record<string, number> = {
   small: 120,
   medium: 230,
   large: 380,
+  huge: 640,
 };
 
 /** Bounding grid dimensions (axial) per map size. */
@@ -46,7 +47,19 @@ export const MAP_GRID: Record<string, { w: number; h: number }> = {
   small: { w: 17, h: 13 },
   medium: { w: 23, h: 17 },
   large: { w: 29, h: 21 },
+  huge: { w: 37, h: 27 },
 };
+
+/** Legacy tree-density choices (MapGenerator.treesPercentages), in percent. */
+export const TREES_PERCENTAGES = [0, 5, 10, 15, 25, 33, 50, 66, 75, 90, 95, 100];
+
+/** Default tree density (10%), matching the original preference default. */
+export const DEFAULT_TREE_PERCENTAGE = 10;
+
+/** Max players per map size (the original caps small maps; the web palette caps at 6). */
+export function maxPlayersForMapSize(size: string): number {
+  return size === "small" ? 5 : 6;
+}
 
 /** Player fraction colors (UI + minimap). Index = fraction. */
 export const FRACTION_COLORS = [

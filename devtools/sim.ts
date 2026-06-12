@@ -27,15 +27,20 @@ function check(state: GameState, label: string) {
   }
 }
 
+const sizeByRun = ["small", "medium", "large", "huge"] as const;
 for (const mode of ["antiyoy", "slay"] as const) {
   for (let t = 0; t < 4; t++) {
     const players = 2 + t;
+    const mapSize = sizeByRun[t];
     const st = createGame({
-      mapSize: "medium",
+      mapSize,
       playerCount: players,
       humanCount: 0,
       seed: 500 + t * 13,
       mode,
+      treePercentage: [0, 10, 33, 75][t],
+      startingProvinces: (t === 3 ? 2 : 0) as 0 | 2,
+      colorOffset: t,
     });
     const replayStart = structuredClone(st);
     const replayActions: Action[] = [];
@@ -57,7 +62,7 @@ for (const mode of ["antiyoy", "slay"] as const) {
       throw new Error(`${mode} ${players}p replay diverged from recorded game`);
     }
     console.log(
-      `${mode} ${players}p: neutral@start=${neutral}, rounds=${st.round}, winner=${
+      `${mode} ${players}p ${mapSize}: neutral@start=${neutral}, rounds=${st.round}, winner=${
         st.winner === null ? "none (stalemate!)" : "P" + st.winner
       }`
     );

@@ -6,7 +6,7 @@ import { applyAction } from "../game/engine";
 import type { Action, GameState } from "../game/types";
 import { fitToIsland, HEX_SIZE, makeCamera, type Camera } from "../camera";
 import { renderBoard } from "../render";
-import { ORIGINAL_FRACTION_COLORS } from "../sprites";
+import { displayFractionColor } from "../colors";
 
 export interface ReplayStep {
   action: Action;
@@ -125,7 +125,7 @@ export function ReplayViewer({
                 <span className="flex items-center gap-1.5">
                   <span
                     className="h-3 w-3 rounded-full ring-1 ring-black/20"
-                    style={{ background: ORIGINAL_FRACTION_COLORS[fraction] }}
+                    style={{ background: displayFractionColor(initialState.config, fraction) }}
                   />
                   P{fraction + 1}
                 </span>

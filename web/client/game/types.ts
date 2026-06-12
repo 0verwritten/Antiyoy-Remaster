@@ -49,7 +49,7 @@ export interface Province {
   capital: number;
 }
 
-export type MapSize = "small" | "medium" | "large";
+export type MapSize = "small" | "medium" | "large" | "huge";
 
 export type Difficulty = "easy" | "normal" | "hard";
 
@@ -62,7 +62,7 @@ export type GameMode = "antiyoy" | "slay";
 
 export interface GameConfig {
   mapSize: MapSize;
-  /** Total players, 2..6. Player fraction 0 is always the human unless humanCount is 0. */
+  /** Total players, 2..6 (2..5 on small maps). Player fraction 0 is always the human unless humanCount is 0. */
   playerCount: number;
   /** How many of the players are humans (hotseat). 0 = AI-only spectator game. */
   humanCount: number;
@@ -72,6 +72,16 @@ export interface GameConfig {
   difficulty?: Difficulty;
   /** Territory setup. Defaults to "antiyoy" when omitted. */
   mode?: GameMode;
+  /** Tree spawn chance in percent (legacy values 0..100). Defaults to 10. */
+  treePercentage?: number;
+  /** Starting provinces per player in antiyoy mode. 0/omitted = map-size default (1/2/3/4). */
+  startingProvinces?: 0 | 1 | 2 | 3 | 4;
+  /** Rotates the fraction palette so the first human gets the chosen color. */
+  colorOffset?: number;
+  /** Not implemented yet — reserved so saved configs stay forward-compatible. */
+  fogOfWar?: boolean;
+  /** Not implemented yet — reserved so saved configs stay forward-compatible. */
+  diplomacy?: boolean;
 }
 
 export interface GameState {

@@ -1,16 +1,17 @@
 // Hotseat pass-the-device interstitial.
 
 import { MenuButton } from "../ui/controls";
-import { MENU_BACKGROUND_COLOR, ORIGINAL_FRACTION_COLORS } from "../sprites";
+import { MENU_BACKGROUND_COLOR } from "../sprites";
 
 export function PassScreen({
   fraction,
+  color,
   onContinue,
 }: {
   fraction: number;
+  color: string;
   onContinue: () => void;
 }) {
-  const color = ORIGINAL_FRACTION_COLORS[fraction] ?? "#999";
   return (
     <main
       className="flex h-screen w-screen items-center justify-center"

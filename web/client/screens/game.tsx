@@ -2,7 +2,7 @@
 // recording, hotseat pass screen and victory overlay.
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { NEUTRAL_FRACTION, PRICE_STRONG_TOWER, PRICE_TOWER } from "../game/constants";
+import { PRICE_STRONG_TOWER, PRICE_TOWER } from "../game/constants";
 import {
   applyAction,
   getBuildZone,
@@ -22,7 +22,8 @@ import { fitToIsland, HEX_SIZE, makeCamera, screenToWorld, type Camera } from ".
 import { pixelToHex, type Point } from "../hex";
 import { renderBoard, type RenderState } from "../render";
 import { aiDelayMs, settings } from "../settings";
-import { ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL, ORIGINAL_FRACTION_COLORS } from "../sprites";
+import { ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL } from "../sprites";
+import { displayFractionColor } from "../colors";
 import type { Pending, Screen } from "./model";
 import { usePointerControls } from "../ui/pointer";
 import { MenuButton } from "../ui/controls";
@@ -397,6 +398,7 @@ export function GameScreen(props: GameScreenProps) {
     return (
       <PassScreen
         fraction={f}
+        color={displayFractionColor(state.config, f)}
         onContinue={() => {
           setScreen({ kind: "game" });
           refreshUi();
@@ -521,7 +523,7 @@ export function GameScreen(props: GameScreenProps) {
       {state.winner !== null && (
         <VictoryOverlay
           label={fractionLabel(state, state.winner)}
-          winner={state.winner}
+          color={displayFractionColor(state.config, state.winner)}
           onReplay={() => setShowReplay(true)}
           onPlayAgain={props.onPlayAgain}
           onMenu={props.onMenu}
@@ -556,7 +558,7 @@ function TopBar({
   onMenu: () => void;
 }) {
   const f = state.turn;
-  const color = f < NEUTRAL_FRACTION ? ORIGINAL_FRACTION_COLORS[f] : "#999";
+  const color = displayFractionColor(state.config, f);
   return (
     <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-2 px-3 py-2">
       <div className="flex items-center gap-2 rounded-full bg-[#f0eee3] px-3 py-1.5 text-[#3a3a33] shadow">

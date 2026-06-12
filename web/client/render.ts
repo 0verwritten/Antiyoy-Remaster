@@ -51,9 +51,15 @@ function drawSprite(
 
 // --- color helpers -----------------------------------------------------------
 
+// Preferred-color rotation for the current frame (set by renderBoard).
+let paletteOffset = 0;
+
 function fractionColor(fraction: number): string {
   if (fraction >= NEUTRAL_FRACTION) return ORIGINAL_NEUTRAL_COLOR;
-  return ORIGINAL_FRACTION_COLORS[fraction] ?? ORIGINAL_NEUTRAL_COLOR;
+  return (
+    ORIGINAL_FRACTION_COLORS[(fraction + paletteOffset) % ORIGINAL_FRACTION_COLORS.length] ??
+    ORIGINAL_NEUTRAL_COLOR
+  );
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -121,6 +127,7 @@ export function renderBoard(
   cssW: number,
   cssH: number
 ) {
+  paletteOffset = state.config.colorOffset ?? 0;
   ctx.clearRect(0, 0, cssW, cssH);
   ctx.fillStyle = WATER_COLOR;
   ctx.fillRect(0, 0, cssW, cssH);

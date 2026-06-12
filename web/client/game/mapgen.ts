@@ -4,12 +4,11 @@
 // island is connected and covers enough of the bounds; then provinces are
 // spawned, cut down to small sizes and lightly balanced, like the original.
 
-import { NEUTRAL_FRACTION } from "./constants";
+import { DEFAULT_TREE_PERCENTAGE, NEUTRAL_FRACTION } from "./constants";
 import type { GameState, HexTile } from "./types";
 
 const SMALL_PROVINCE_SIZE = 5;
 const ISLAND_POTENTIAL = 7;
-const TREES_SPAWN_CHANCE = 0.1;
 
 // --- RNG (same mulberry32 stream as the engine, advancing state.rngState) ----
 
@@ -76,6 +75,8 @@ function islandsByMapSize(state: GameState): number {
       return 2;
     case "medium":
       return 4;
+    case "huge":
+      return 35;
     default:
       return 20; // original "big"
   }
@@ -93,7 +94,7 @@ function gridDims(state: GameState): { cols: number; rows: number } {
 
 function randomHexInsideBounds(state: GameState): HexTile {
   const { cols, rows } = gridDims(state);
-  if (state.config.mapSize !== "large") {
+  if (state.config.mapSize !== "large" && state.config.mapSize !== "huge") {
     return state.hexes[randomInt(state, rows) * cols + randomInt(state, cols)];
   }
   // Bigger maps bias island centers toward the middle (original radial pick).
@@ -219,9 +220,10 @@ function createLand(state: GameState, slay: boolean) {
 // --- trees (original addTrees) --------------------------------------------------
 
 function addTrees(state: GameState) {
+  const chance = (state.config.treePercentage ?? DEFAULT_TREE_PERCENTAGE) / 100;
   for (const hex of state.hexes) {
     if (!hex.active || hex.obj !== "none") continue;
-    if (nextRandom(state) >= TREES_SPAWN_CHANCE) continue;
+    if (nextRandom(state) >= chance) continue;
     hex.obj = isNearWater(state, hex) ? "palm" : "pine";
     hex.treeBorn = -1;
   }
@@ -286,11 +288,15 @@ function giveAdvantage(state: GameState, fraction: number, power: number, intoNe
 // --- antiyoy (generic) mode -------------------------------------------------------
 
 function provincesQuantity(state: GameState): number {
+  const explicit = state.config.startingProvinces ?? 0;
+  if (explicit > 0) return explicit;
   switch (state.config.mapSize) {
     case "small":
       return 1;
     case "medium":
       return 2;
+    case "huge":
+      return 4;
     default:
       return 3;
   }
