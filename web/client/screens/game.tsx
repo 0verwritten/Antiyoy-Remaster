@@ -343,7 +343,7 @@ export function GameScreen(props: GameScreenProps) {
       dirtyRef.current = true;
     },
     (screenPt) => onTap(screenPt),
-    () => aiThinkingRef.current || screen.kind !== "game" || paused !== "none",
+    () => screen.kind !== "game" || paused !== "none",
     (screenPt) => onLongPress(screenPt)
   );
 

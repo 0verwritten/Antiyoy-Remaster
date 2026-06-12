@@ -29,8 +29,17 @@ export function usePointerControls(
     let pinchDist = 0;
     let pinchMid: Point | null = null;
     let longPressTimer = 0;
+    let mouseDown = false;
+    let mouseLast: Point | null = null;
+    let mouseStart: Point | null = null;
+    let mouseMovedDist = 0;
 
     const local = (e: PointerEvent): Point => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const localMouse = (e: MouseEvent): Point => {
       const rect = canvas.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
@@ -43,7 +52,7 @@ export function usePointerControls(
     };
 
     const onDown = (e: PointerEvent) => {
-      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (e.pointerType === "mouse") return;
       e.preventDefault();
       try {
         canvas.setPointerCapture(e.pointerId);
@@ -76,6 +85,7 @@ export function usePointerControls(
     };
 
     const onMove = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") return;
       if (!pointers.has(e.pointerId)) return;
       e.preventDefault();
       const p = local(e);
@@ -117,6 +127,7 @@ export function usePointerControls(
     };
 
     const finishPointer = (e: PointerEvent, cancelled: boolean) => {
+      if (e.pointerType === "mouse") return;
       if (!pointers.has(e.pointerId)) return;
       e.preventDefault();
       cancelLongPress();
@@ -146,6 +157,54 @@ export function usePointerControls(
     const onUp = (e: PointerEvent) => finishPointer(e, false);
     const onCancel = (e: PointerEvent) => finishPointer(e, true);
 
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      mouseDown = true;
+      mouseLast = localMouse(e);
+      mouseStart = mouseLast;
+      mouseMovedDist = 0;
+      canvas.style.cursor = "grabbing";
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!mouseDown || !mouseLast) return;
+      e.preventDefault();
+      const p = localMouse(e);
+      const dx = p.x - mouseLast.x;
+      const dy = p.y - mouseLast.y;
+      mouseMovedDist += Math.hypot(dx, dy);
+      if (!blocked()) {
+        const sens = settings.cameraSensitivity || 1;
+        camRef.current = constrainCamera({
+          ...camRef.current,
+          x: camRef.current.x - (dx * sens) / camRef.current.scale,
+          y: camRef.current.y - (dy * sens) / camRef.current.scale,
+        });
+        onChange();
+      }
+      mouseLast = p;
+    };
+
+    const finishMouse = (e: MouseEvent, cancelled: boolean) => {
+      if (!mouseDown) return;
+      if (!cancelled) e.preventDefault();
+      mouseDown = false;
+      canvas.style.cursor = "grab";
+      if (!cancelled && mouseStart && mouseMovedDist < 6) onTap(mouseStart);
+      mouseLast = null;
+      mouseStart = null;
+    };
+
+    const onMouseUp = (e: MouseEvent) => finishMouse(e, false);
+    const onWindowBlur = () => {
+      if (!mouseDown) return;
+      mouseDown = false;
+      mouseLast = null;
+      mouseStart = null;
+      canvas.style.cursor = "grab";
+    };
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (blocked()) return;
@@ -166,6 +225,10 @@ export function usePointerControls(
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onCancel);
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("blur", onWindowBlur);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       cancelLongPress();
@@ -173,6 +236,10 @@ export function usePointerControls(
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onCancel);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("blur", onWindowBlur);
       canvas.removeEventListener("wheel", onWheel);
     };
   }, [canvasRef, camRef, constrainCamera, onChange, onTap, blocked, onLongPress]);
