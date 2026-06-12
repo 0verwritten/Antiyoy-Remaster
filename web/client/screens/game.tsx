@@ -749,13 +749,13 @@ function ZoomControls({
     "flex min-h-[44px] min-w-[44px] items-center justify-center bg-[#f0eee3] px-3 font-black text-[#3a3a33] shadow hover:brightness-95 active:bg-[#dedbc8]";
   return (
     <div className="absolute right-3 top-16 flex flex-col overflow-hidden rounded-xl" aria-label="Map zoom controls">
-      <button type="button" onClick={onZoomIn} title="Zoom in (+)" aria-label="Zoom in" className={`${buttonClass} text-2xl`}>
+      <button type="button" onClick={onZoomIn} title="Zoom in (+)" aria-label="Zoom in" className={`${buttonClass} hidden text-2xl md:flex`}>
         +
       </button>
-      <button type="button" onClick={onFit} title="Fit map (0)" className={`${buttonClass} border-y border-black/10 text-xs`}>
+      <button type="button" onClick={onFit} title="Fit map (0)" className={`${buttonClass} text-xs md:border-y md:border-black/10`}>
         Fit
       </button>
-      <button type="button" onClick={onZoomOut} title="Zoom out (-)" aria-label="Zoom out" className={`${buttonClass} text-2xl`}>
+      <button type="button" onClick={onZoomOut} title="Zoom out (-)" aria-label="Zoom out" className={`${buttonClass} hidden text-2xl md:flex`}>
         -
       </button>
     </div>

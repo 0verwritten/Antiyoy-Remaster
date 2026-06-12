@@ -26,6 +26,7 @@ export function usePointerControls(
     let startSingle: Point | null = null;
     let movedDist = 0;
     let pinchDist = 0;
+    let pinchMid: Point | null = null;
     let longPressTimer = 0;
 
     const local = (e: PointerEvent): Point => {
@@ -41,8 +42,13 @@ export function usePointerControls(
     };
 
     const onDown = (e: PointerEvent) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
       e.preventDefault();
-      canvas.setPointerCapture(e.pointerId);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        /* Pointer capture is unavailable in some mobile webviews. */
+      }
       const p = local(e);
       pointers.set(e.pointerId, p);
       if (pointers.size === 1) {
@@ -63,6 +69,8 @@ export function usePointerControls(
         cancelLongPress();
         const pts = [...pointers.values()];
         pinchDist = dist(pts[0], pts[1]);
+        pinchMid = midpoint(pts[0], pts[1]);
+        movedDist += 999; // a multi-touch gesture is never a tap
       }
     };
 
@@ -90,17 +98,24 @@ export function usePointerControls(
       } else if (pointers.size === 2) {
         const pts = [...pointers.values()];
         const d = dist(pts[0], pts[1]);
-        const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-        if (pinchDist > 0 && !blocked()) {
-          camRef.current = zoomAt(camRef.current, mid, d / pinchDist);
+        const mid = midpoint(pts[0], pts[1]);
+        if (pinchDist > 0 && pinchMid && !blocked()) {
+          const cam = camRef.current;
+          const sens = settings.cameraSensitivity || 1;
+          const movedCam: Camera = {
+            ...cam,
+            x: cam.x - ((mid.x - pinchMid.x) * sens) / cam.scale,
+            y: cam.y - ((mid.y - pinchMid.y) * sens) / cam.scale,
+          };
+          camRef.current = zoomAt(movedCam, mid, d / pinchDist);
           onChange();
         }
         pinchDist = d;
-        movedDist += 999; // a pinch is never a tap
+        pinchMid = mid;
       }
     };
 
-    const onUp = (e: PointerEvent) => {
+    const finishPointer = (e: PointerEvent, cancelled: boolean) => {
       if (!pointers.has(e.pointerId)) return;
       e.preventDefault();
       cancelLongPress();
@@ -111,24 +126,37 @@ export function usePointerControls(
       } catch {
         /* ignore */
       }
-      if (wasSingle && startSingle && movedDist < 6) {
+      if (!cancelled && wasSingle && startSingle && movedDist < 6) {
         onTap(startSingle);
       }
       if (pointers.size === 0) {
         lastSingle = null;
         startSingle = null;
+        pinchDist = 0;
+        pinchMid = null;
       } else if (pointers.size === 1) {
         lastSingle = [...pointers.values()][0];
+        startSingle = null;
+        pinchDist = 0;
+        pinchMid = null;
       }
     };
+
+    const onUp = (e: PointerEvent) => finishPointer(e, false);
+    const onCancel = (e: PointerEvent) => finishPointer(e, true);
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (blocked()) return;
       const rect = canvas.getBoundingClientRect();
       const pivot = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const step = 1 + 0.12 * (settings.cameraSensitivity || 1);
-      const factor = e.deltaY < 0 ? step : 1 / step;
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? canvas.clientHeight
+          : 1;
+      const delta = Math.max(-240, Math.min(240, e.deltaY * unit));
+      const factor = Math.exp(-delta * 0.0015 * (settings.cameraSensitivity || 1));
       camRef.current = zoomAt(camRef.current, pivot, factor);
       onChange();
     };
@@ -136,14 +164,14 @@ export function usePointerControls(
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("pointercancel", onCancel);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       cancelLongPress();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
       canvas.removeEventListener("wheel", onWheel);
     };
   }, [canvasRef, camRef, onChange, onTap, blocked, onLongPress]);
@@ -151,4 +179,8 @@ export function usePointerControls(
 
 function dist(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function midpoint(a: Point, b: Point): Point {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
