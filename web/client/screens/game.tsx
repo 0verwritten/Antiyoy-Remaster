@@ -26,6 +26,14 @@ import { renderBoard, type RenderState } from "../render";
 import { aiDelayMs, settings } from "../settings";
 import { ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL } from "../sprites";
 import { displayFractionColor } from "../colors";
+import {
+  AUTOSAVE_ID,
+  newRecordId,
+  putReplay,
+  putSave,
+  RECORD_VERSION,
+  type SaveRecord,
+} from "../game-storage";
 import type { Pending, Screen } from "./model";
 import { usePointerControls } from "../ui/pointer";
 import { MenuButton } from "../ui/controls";
@@ -43,6 +51,8 @@ export interface GameScreenProps {
   onMenu: () => void;
   onRestart: () => void;
   onPlayAgain: () => void;
+  /** Restored replay history when this game came from a saved record. */
+  initialReplay?: { initial: GameState; steps: ReplayStep[] } | null;
 }
 
 const UNDO_STACK_LIMIT = 50;
@@ -64,11 +74,17 @@ export function GameScreen(props: GameScreenProps) {
   const dirtyRef = useRef<boolean>(true);
   const undoRef = useRef<UndoEntry[]>([]);
   const aliveRef = useRef(true);
-  const replayInitialRef = useRef<GameState>(structuredClone(state));
-  const replayStepsRef = useRef<ReplayStep[]>([]);
+  const replayInitialRef = useRef<GameState>(
+    props.initialReplay ? props.initialReplay.initial : structuredClone(state)
+  );
+  const replayStepsRef = useRef<ReplayStep[]>(
+    props.initialReplay ? [...props.initialReplay.steps] : []
+  );
+  const replayPersistedRef = useRef(false);
   const [showReplay, setShowReplay] = useState(false);
   // Pause menu overlays the board so the game is never unmounted.
   const [paused, setPaused] = useState<"none" | "menu" | "settings">("none");
+  const [justSaved, setJustSaved] = useState(false);
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -230,6 +246,28 @@ export function GameScreen(props: GameScreenProps) {
     if (state && state.winner === null && !isHumanTurn(state)) runAiIfNeeded();
   }, [state, runAiIfNeeded]);
 
+  /** Snapshot of the running game as a persistable save record. */
+  const buildSaveRecord = useCallback(
+    (id: string, name: string): SaveRecord | null => {
+      const st = stateRef.current;
+      const cfg = props.configRef.current;
+      if (!st || !cfg) return null;
+      const now = Date.now();
+      return {
+        version: RECORD_VERSION,
+        id,
+        name,
+        createdAt: now,
+        updatedAt: now,
+        config: structuredClone(cfg),
+        state: structuredClone(st),
+        replayInitial: structuredClone(replayInitialRef.current),
+        replaySteps: structuredClone(replayStepsRef.current),
+      };
+    },
+    [stateRef, props.configRef]
+  );
+
   const doEndTurn = useCallback(() => {
     const st = stateRef.current;
     if (!st || aiThinkingRef.current || st.winner !== null) return;
@@ -238,9 +276,34 @@ export function GameScreen(props: GameScreenProps) {
     clearSelection();
     undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
+    // End-of-human-turn autosave (turns are final, so this never races undo).
+    if (st.config.humanCount > 0 && st.winner === null) {
+      const record = buildSaveRecord(AUTOSAVE_ID, "Autosave");
+      if (record) void putSave(record).catch(() => {});
+    }
     forceRender();
     runAiIfNeeded();
-  }, [stateRef, clearSelection, forceRender, runAiIfNeeded]);
+  }, [stateRef, clearSelection, forceRender, runAiIfNeeded, buildSaveRecord]);
+
+  // Persist a replay record once when the game ends.
+  useEffect(() => {
+    const st = stateRef.current;
+    const cfg = props.configRef.current;
+    if (!st || !cfg || st.winner === null || replayPersistedRef.current) return;
+    replayPersistedRef.current = true;
+    const mode = (cfg.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
+    void putReplay({
+      version: RECORD_VERSION,
+      id: newRecordId(),
+      name: `${mode} ${cfg.mapSize} ${cfg.playerCount}p`,
+      createdAt: Date.now(),
+      config: structuredClone(cfg),
+      initial: structuredClone(replayInitialRef.current),
+      steps: structuredClone(replayStepsRef.current),
+      winner: st.winner,
+      rounds: st.round,
+    }).catch(() => {});
+  }, [state.winner, stateRef, props.configRef]);
 
   // ---- pointer interaction (pan/zoom/tap/long-press march) ----
   usePointerControls(
@@ -531,6 +594,27 @@ export function GameScreen(props: GameScreenProps) {
             <div className="flex w-full max-w-xs flex-col gap-3 rounded-3xl bg-[#b3ae7e] p-6 shadow-[0_4px_0_rgba(0,0,0,0.25)]">
               <h2 className="mb-1 text-center text-2xl font-black text-[#2e2e28]">Paused</h2>
               <MenuButton onClick={() => setPaused("none")}>Resume</MenuButton>
+              <MenuButton
+                onClick={() => {
+                  const cfg = props.configRef.current;
+                  const mode = (cfg?.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
+                  const name = prompt(
+                    "Save name:",
+                    `${mode} ${cfg?.mapSize ?? ""} · round ${state.round + 1}`
+                  );
+                  if (!name) return;
+                  const record = buildSaveRecord(newRecordId(), name);
+                  if (!record) return;
+                  void putSave(record)
+                    .then(() => {
+                      setJustSaved(true);
+                      setTimeout(() => setJustSaved(false), 1500);
+                    })
+                    .catch(() => alert("Saving failed — storage may be unavailable."));
+                }}
+              >
+                {justSaved ? "Saved ✓" : "Save"}
+              </MenuButton>
               <MenuButton
                 onClick={() => {
                   if (confirm("Restart this game from the beginning?")) props.onRestart();

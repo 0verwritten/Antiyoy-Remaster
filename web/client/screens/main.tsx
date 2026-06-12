@@ -9,12 +9,16 @@ export function MainMenuScreen({
   canResume,
   onPlay,
   onResume,
+  onLoad,
+  onReplays,
   onSettings,
   onAbout,
 }: {
   canResume: boolean;
   onPlay: () => void;
   onResume: () => void;
+  onLoad: () => void;
+  onReplays: () => void;
   onSettings: () => void;
   onAbout: () => void;
 }) {
@@ -38,6 +42,8 @@ export function MainMenuScreen({
           <MenuButton onClick={onPlay} className="text-xl">
             Play
           </MenuButton>
+          <MenuButton onClick={onLoad}>Load game</MenuButton>
+          <MenuButton onClick={onReplays}>Replays</MenuButton>
           <MenuButton onClick={onSettings}>Settings</MenuButton>
           <MenuButton onClick={onAbout}>About</MenuButton>
         </div>

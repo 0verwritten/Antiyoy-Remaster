@@ -2,15 +2,18 @@
 // queries/mutations needed. The app shell routes between screen modules in
 // client/screens/.
 
-import { useCallback, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { createGame } from "./game/engine";
-import type { GameConfig, GameState } from "./game/types";
+import type { GameConfig, GameState, ReplayStep } from "./game/types";
 import { settings } from "./settings";
+import { latestSave, type SaveRecord } from "./game-storage";
 import type { Screen } from "./screens/model";
 import { MainMenuScreen } from "./screens/main";
 import { SkirmishScreen } from "./screens/skirmish";
 import { SettingsScreen } from "./screens/settings";
 import { AboutScreen } from "./screens/about";
+import { LoadScreen } from "./screens/load";
+import { ReplaysScreen } from "./screens/replays";
 import { GameScreen } from "./screens/game";
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
@@ -41,16 +44,27 @@ export function App() {
   const [screen, setScreen] = useState<Screen>({ kind: "main" });
   const stateRef = useRef<GameState | null>(null);
   const configRef = useRef<GameConfig | null>(null);
+  // Replay history restored from a loaded save (null for fresh games).
+  const loadedReplayRef = useRef<{ initial: GameState; steps: ReplayStep[] } | null>(null);
   // Bumped per started game so GameScreen remounts even when the config and
   // seed are identical (Restart).
   const gameIdRef = useRef(0);
+  const [hasSavedGame, setHasSavedGame] = useState(false);
   const [, bump] = useState(0);
   const forceRender = useCallback(() => bump((n) => n + 1), []);
+
+  // The Resume button also covers the latest save when nothing is running.
+  useEffect(() => {
+    if (screen.kind === "main" && !stateRef.current) {
+      latestSave().then((r) => setHasSavedGame(!!r), () => setHasSavedGame(false));
+    }
+  }, [screen.kind]);
 
   const startGame = useCallback(
     (config: GameConfig) => {
       configRef.current = config;
       stateRef.current = createGame(config);
+      loadedReplayRef.current = null;
       gameIdRef.current++;
       setScreen({ kind: "game" });
       forceRender();
@@ -58,16 +72,40 @@ export function App() {
     [forceRender]
   );
 
-  const resumeGame = useCallback(() => {
-    const st = stateRef.current;
-    if (!st || st.winner !== null) return;
+  const enterGameScreen = useCallback((state: GameState) => {
     // Hotseat: never show a player's board before the pass screen.
-    if (st.config.humanCount >= 2 && st.turn < st.config.humanCount) {
-      setScreen({ kind: "pass", fraction: st.turn });
+    if (state.config.humanCount >= 2 && state.turn < state.config.humanCount) {
+      setScreen({ kind: "pass", fraction: state.turn });
     } else {
       setScreen({ kind: "game" });
     }
   }, []);
+
+  const loadSavedGame = useCallback(
+    (record: SaveRecord) => {
+      configRef.current = structuredClone(record.config);
+      stateRef.current = structuredClone(record.state);
+      loadedReplayRef.current = {
+        initial: structuredClone(record.replayInitial),
+        steps: structuredClone(record.replaySteps),
+      };
+      gameIdRef.current++;
+      enterGameScreen(stateRef.current);
+      forceRender();
+    },
+    [enterGameScreen, forceRender]
+  );
+
+  const resumeGame = useCallback(() => {
+    const st = stateRef.current;
+    if (st && st.winner === null) {
+      enterGameScreen(st);
+      return;
+    }
+    latestSave().then((record) => {
+      if (record) loadSavedGame(record);
+    });
+  }, [enterGameScreen, loadSavedGame]);
 
   switch (screen.kind) {
     case "main":
@@ -75,11 +113,12 @@ export function App() {
         <MainMenuScreen
           canResume={
             settings.showResumeButton &&
-            stateRef.current !== null &&
-            stateRef.current.winner === null
+            ((stateRef.current !== null && stateRef.current.winner === null) || hasSavedGame)
           }
           onPlay={() => setScreen({ kind: "skirmish" })}
           onResume={resumeGame}
+          onLoad={() => setScreen({ kind: "load" })}
+          onReplays={() => setScreen({ kind: "replays" })}
           onSettings={() => setScreen({ kind: "settings" })}
           onAbout={() => setScreen({ kind: "about" })}
         />
@@ -95,6 +134,10 @@ export function App() {
       return <SettingsScreen onBack={() => setScreen({ kind: "main" })} />;
     case "about":
       return <AboutScreen onBack={() => setScreen({ kind: "main" })} />;
+    case "load":
+      return <LoadScreen onBack={() => setScreen({ kind: "main" })} onLoad={loadSavedGame} />;
+    case "replays":
+      return <ReplaysScreen onBack={() => setScreen({ kind: "main" })} />;
     default:
       return (
         <GameScreen
@@ -104,6 +147,7 @@ export function App() {
           stateRef={stateRef}
           configRef={configRef}
           forceRender={forceRender}
+          initialReplay={loadedReplayRef.current}
           onMenu={() => setScreen({ kind: "main" })}
           onRestart={() => {
             const cfg = configRef.current;

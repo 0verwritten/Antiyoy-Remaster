@@ -3,16 +3,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { applyAction } from "../game/engine";
-import type { Action, GameState } from "../game/types";
+import type { Action, GameState, ReplayStep } from "../game/types";
 import { fitToIsland, HEX_SIZE, makeCamera, type Camera } from "../camera";
 import { renderBoard } from "../render";
 import { displayFractionColor } from "../colors";
 
-export interface ReplayStep {
-  action: Action;
-  actor: number;
-  moneyDelta: number[];
-}
+export type { ReplayStep };
 
 export function ReplayViewer({
   initialState,

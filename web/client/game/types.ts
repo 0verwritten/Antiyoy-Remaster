@@ -128,3 +128,11 @@ export interface ActionResult {
   /** Human-readable reason when ok=false. */
   reason?: string;
 }
+
+/** One recorded step of a game, for replays and saved games. */
+export interface ReplayStep {
+  action: Action;
+  actor: number;
+  /** Per-fraction treasury change caused by this action. */
+  moneyDelta: number[];
+}

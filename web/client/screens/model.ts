@@ -11,6 +11,8 @@ export type Screen =
   | { kind: "skirmish" }
   | { kind: "settings" }
   | { kind: "about" }
+  | { kind: "load" } // saved games
+  | { kind: "replays" } // replay library
   | { kind: "game" }
   | { kind: "pass"; fraction: number }; // hotseat interstitial
 

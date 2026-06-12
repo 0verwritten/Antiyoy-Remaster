@@ -73,6 +73,31 @@ await page.getByRole("button", { name: /^resume$/i }).click();
 const backInGame = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(0, 80));
 console.log("after main-menu resume:", backInGame);
 
+// Save the game, then load it back through the Load screen.
+page.on("dialog", (d) => d.accept(d.defaultValue() || "smoke-save"));
+await page.getByRole("button", { name: /^menu$/i }).click();
+await page.getByRole("button", { name: /^save$/i }).click();
+await page.waitForTimeout(400);
+await page.getByRole("button", { name: /main menu/i }).click();
+await page.getByRole("button", { name: /load game/i }).click();
+await page.waitForTimeout(400);
+const loadList = await page.evaluate(() => document.body.innerText);
+if (!/Autosave|round/i.test(loadList)) throw new Error("load screen shows no saves after saving");
+await page.getByRole("button", { name: /^load$/i }).first().click();
+await page.waitForTimeout(600);
+const loaded = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(0, 80));
+if (!/Player/.test(loaded)) throw new Error("loading a save did not return to the game");
+console.log("save/load round trip: ok");
+
+// Replay library is reachable.
+await page.getByRole("button", { name: /^menu$/i }).click();
+await page.getByRole("button", { name: /main menu/i }).click();
+await page.getByRole("button", { name: /^replays$/i }).click();
+await page.waitForTimeout(300);
+const replayList = await page.evaluate(() => document.body.innerText);
+if (!/Replays/.test(replayList)) throw new Error("replays screen did not open");
+console.log("replay library: ok");
+
 console.log("ERRORS:", errors.length ? errors.join("\n") : "none");
 console.log("screenshots: /tmp/antiyoy-check-game.png /tmp/antiyoy-check-round2.png");
 await browser.close();
