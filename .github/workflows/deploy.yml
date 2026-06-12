@@ -1,0 +1,32 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "web/**"
+      - "devtools/check-bundle.mjs"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check bundle budget
+        run: node devtools/check-bundle.mjs
+
+      - name: Deploy to lakebed
+        working-directory: web
+        env:
+          LAKEBED_TOKEN: ${{ secrets.LAKEBED_TOKEN }}
+        run: npx lakebed deploy --json
