@@ -92,24 +92,51 @@ function gridDims(state: GameState): { cols: number; rows: number } {
   return { cols, rows };
 }
 
+// --- bounds (original isHexInsideBounds margins, as a one-hex grid ring) ------
+
+function offsetCoords(hex: HexTile): { col: number; row: number } {
+  return { col: hex.q + Math.floor(hex.r / 2), row: hex.r };
+}
+
+/** Hexes on the outermost grid ring are "outside bounds", like the original's screen margins. */
+function isHexInsideBounds(state: GameState, hex: HexTile): boolean {
+  const { cols, rows } = gridDims(state);
+  const { col, row } = offsetCoords(hex);
+  return col >= 1 && col < cols - 1 && row >= 1 && row < rows - 1;
+}
+
+function numberOfAvailableHexes(state: GameState): number {
+  const { cols, rows } = gridDims(state);
+  return (cols - 2) * (rows - 2);
+}
+
+function deactivateHex(hex: HexTile) {
+  hex.active = false;
+  hex.fraction = NEUTRAL_FRACTION;
+}
+
 function randomHexInsideBounds(state: GameState): HexTile {
   const { cols, rows } = gridDims(state);
-  if (state.config.mapSize !== "large" && state.config.mapSize !== "huge") {
-    return state.hexes[randomInt(state, rows) * cols + randomInt(state, cols)];
-  }
-  // Bigger maps bias island centers toward the middle (original radial pick).
+  const radial = state.config.mapSize === "large" || state.config.mapSize === "huge";
   const center = state.hexes[Math.floor(rows / 2) * cols + Math.floor(cols / 2)];
   const cpos = hexPos(center);
   const boundHeight = 1.5 * rows;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const a = nextRandom(state) * 2 * Math.PI;
-    const r = nextRandom(state) * nextRandom(state) * 0.5 * boundHeight;
-    const x = cpos.x + r * Math.cos(a);
-    const y = cpos.y + r * Math.sin(a);
-    const rr = Math.round(y / 1.5);
-    const qq = Math.round(x / Math.sqrt(3) - rr / 2);
-    const col = qq + Math.floor(rr / 2);
-    if (rr >= 0 && rr < rows && col >= 0 && col < cols) return state.hexes[rr * cols + col];
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    let candidate: HexTile | null = null;
+    if (!radial) {
+      candidate = state.hexes[randomInt(state, rows) * cols + randomInt(state, cols)];
+    } else {
+      // Bigger maps bias island centers toward the middle (original radial pick).
+      const a = nextRandom(state) * 2 * Math.PI;
+      const r = nextRandom(state) * nextRandom(state) * 0.5 * boundHeight;
+      const x = cpos.x + r * Math.cos(a);
+      const y = cpos.y + r * Math.sin(a);
+      const rr = Math.round(y / 1.5);
+      const qq = Math.round(x / Math.sqrt(3) - rr / 2);
+      const col = qq + Math.floor(rr / 2);
+      if (rr >= 0 && rr < rows && col >= 0 && col < cols) candidate = state.hexes[rr * cols + col];
+    }
+    if (candidate && isHexInsideBounds(state, candidate)) return candidate;
   }
   return center;
 }
@@ -190,13 +217,72 @@ function isLinked(state: GameState): boolean {
   return seen.size === active.length;
 }
 
+/** Original centerLand: shift the island so its bounding box centers on the grid. */
+function centerLand(state: GameState) {
+  const { cols, rows } = gridDims(state);
+  let minC = Infinity;
+  let maxC = -Infinity;
+  let minR = Infinity;
+  let maxR = -Infinity;
+  for (const hex of state.hexes) {
+    if (!hex.active) continue;
+    const { col, row } = offsetCoords(hex);
+    if (col < minC) minC = col;
+    if (col > maxC) maxC = col;
+    if (row < minR) minR = row;
+    if (row > maxR) maxR = row;
+  }
+  if (!Number.isFinite(minC)) return;
+  const dC = Math.floor(cols / 2) - Math.floor((minC + maxC) / 2);
+  // Row shifts must stay even: the grid stores offset coordinates, and an
+  // even row delta is an exact axial translation (shape preserved).
+  let dR = Math.floor(rows / 2) - Math.floor((minR + maxR) / 2);
+  dR -= dR % 2;
+  if (dC === 0 && dR === 0) return;
+  const moved: { col: number; row: number; fraction: number }[] = [];
+  for (const hex of state.hexes) {
+    if (!hex.active) continue;
+    const { col, row } = offsetCoords(hex);
+    moved.push({ col, row, fraction: hex.fraction });
+    deactivateHex(hex);
+  }
+  for (const m of moved) {
+    const col = m.col + dC;
+    const row = m.row + dR;
+    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    const hex = state.hexes[row * cols + col];
+    hex.active = true;
+    hex.fraction = m.fraction;
+  }
+}
+
+/** Original maybeDeactivateIfPossible: random edge erosion next to cut-off hexes. */
+function maybeDeactivateIfPossible(state: GameState, hex: HexTile) {
+  if (!hex.active) return;
+  if (nextRandom(state) > 0.8) return;
+  let activeNearby = 0;
+  for (const n of hex.neighbors) if (state.hexes[n].active) activeNearby++;
+  if (activeNearby === 4) deactivateHex(hex);
+}
+
+function cutOffHexesOutsideOfBounds(state: GameState) {
+  for (const hex of state.hexes) {
+    if (!hex.active || isHexInsideBounds(state, hex)) continue;
+    deactivateHex(hex);
+    for (const n of hex.neighbors) maybeDeactivateIfPossible(state, state.hexes[n]);
+  }
+}
+
+/** Original isGood: connected and ≥25% of the usable bounded hexes (not the full grid). */
+function isGood(state: GameState): boolean {
+  const activeCount = state.hexes.filter((h) => h.active).length;
+  return isLinked(state) && activeCount > 0.25 * numberOfAvailableHexes(state);
+}
+
 function createLand(state: GameState, slay: boolean) {
   const islands = islandsByMapSize(state);
   for (let attempt = 0; attempt < 50; attempt++) {
-    for (const hex of state.hexes) {
-      hex.active = false;
-      hex.fraction = NEUTRAL_FRACTION;
-    }
+    for (const hex of state.hexes) deactivateHex(hex);
     const centers: HexTile[] = [];
     for (let i = 0; i < islands; i++) {
       const hex = randomHexInsideBounds(state);
@@ -204,8 +290,9 @@ function createLand(state: GameState, slay: boolean) {
       spawnIsland(state, hex, ISLAND_POTENTIAL, slay);
     }
     unifyIslandsWithRoads(state, centers, slay);
-    const activeCount = state.hexes.filter((h) => h.active).length;
-    if (isLinked(state) && activeCount > 0.25 * state.hexes.length) break;
+    centerLand(state);
+    cutOffHexesOutsideOfBounds(state);
+    if (isGood(state)) break;
   }
   // Original removeSingleHoles: fill lakes of exactly one hex.
   for (const hex of state.hexes) {
@@ -418,25 +505,138 @@ function genericBalance(state: GameState) {
 
 // --- slay mode balancing (original base balanceMap) --------------------------------
 
-function slayBalance(state: GameState) {
-  // The original skips province cutting below 4 players ("to prevent
-  // infinite loop"): with few fractions every cut hex lands on the same
-  // opponent and the map degenerates. Keep the raw symmetric assignment.
-  if (state.config.playerCount >= 4) {
-    // Hexes with no province nearby seed a tiny province (spawnManySmallProvinces).
-    for (const hex of state.hexes) {
-      if (!hex.active) continue;
-      if (friendlyNeighbors(state, hex) === 0) {
-        const fraction = hex.fraction;
-        for (const n of activeNeighbors(state, hex)) {
-          if (nextRandom(state) < 0.5) n.fraction = fraction;
-        }
+/** Original spawnProvince (slay variant): potential blob keeping the seed hex's fraction. */
+function spawnSmallProvince(state: GameState, spawn: HexTile, potential0: number) {
+  const fraction = spawn.fraction;
+  const queue: { hex: HexTile; potential: number }[] = [{ hex: spawn, potential: potential0 }];
+  const pending = new Set([spawn.index]);
+  while (queue.length > 0) {
+    const { hex, potential } = queue.shift()!;
+    pending.delete(hex.index);
+    if (randomInt(state, potential0) > potential) continue;
+    hex.fraction = fraction;
+    if (potential === 0) continue;
+    for (const n of activeNeighbors(state, hex)) {
+      if (n.fraction !== fraction && !pending.has(n.index)) {
+        pending.add(n.index);
+        queue.push({ hex: n, potential: potential - 1 });
       }
     }
-    cutProvincesToSmallSizes(state, false);
   }
-  // Like the original's no-player fix-up: every fraction must own at least
-  // one real (2+) province, or it would be dead before its first turn.
+}
+
+/** Original spawnManySmallProvinces: isolated hexes seed a tiny province. */
+function spawnManySmallProvinces(state: GameState) {
+  for (const hex of state.hexes) {
+    if (!hex.active) continue;
+    if (friendlyNeighbors(state, hex) === 0) spawnSmallProvince(state, hex, 2);
+  }
+}
+
+/** Provinces (2+ hexes) per fraction, like the original countProvinces. */
+function countProvinces(state: GameState): number[] {
+  const numbers = new Array(state.config.playerCount).fill(0);
+  const seen = new Set<number>();
+  for (const hex of state.hexes) {
+    if (!hex.active || seen.has(hex.index)) continue;
+    const province = detectProvince(state, hex);
+    for (const h of province) seen.add(h.index);
+    if (province.length > 1 && hex.fraction < state.config.playerCount) {
+      numbers[hex.fraction]++;
+    }
+  }
+  return numbers;
+}
+
+function maxDifferenceInNumbers(numbers: number[]): number {
+  return Math.max(...numbers) - Math.min(...numbers);
+}
+
+function provinceHasNeighbourWithFraction(state: GameState, province: HexTile[], fraction: number): boolean {
+  for (const hex of province) {
+    for (const n of activeNeighbors(state, hex)) {
+      if (n.fraction === fraction && friendlyNeighbors(state, n) > 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Original tryToGiveAwayProvince: hand the whole province to the first
+ * fraction (in faction order, a legacy compensation detail) that has no
+ * adjacent province of its own.
+ */
+function tryToGiveAwayProvince(state: GameState, province: HexTile[]): boolean {
+  for (let i = 0; i < state.config.playerCount; i++) {
+    if (i === province[0].fraction) continue;
+    if (!provinceHasNeighbourWithFraction(state, province, i)) {
+      for (const hex of province) hex.fraction = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+function giveProvinceToSomeone(state: GameState, giver: number): boolean {
+  const seen = new Set<number>();
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== giver || seen.has(hex.index)) continue;
+    const province = detectProvince(state, hex);
+    for (const h of province) seen.add(h.index);
+    if (province.length > 1 && tryToGiveAwayProvince(state, province)) return true;
+  }
+  return false;
+}
+
+/** Original achieveFairNumberOfProvincesForEveryPlayer. */
+function achieveFairNumberOfProvinces(state: GameState) {
+  let numbers = countProvinces(state);
+  for (let loop = 0; loop < 50 && maxDifferenceInNumbers(numbers) > 1; loop++) {
+    const indexMax = numbers.indexOf(Math.max(...numbers));
+    if (!giveProvinceToSomeone(state, indexMax)) break;
+    numbers = countProvinces(state);
+  }
+}
+
+/** Original increaseProvince (slay): border neighbors of any fraction may flip. */
+function giveAdvantageSlay(state: GameState, fraction: number, power: number) {
+  giveAdvantage(state, fraction, power, false);
+}
+
+/** Original decreaseProvince (slay): border hexes defect to a random fraction. */
+function giveDisadvantageSlay(state: GameState, fraction: number, power: number) {
+  const seen = new Set<number>();
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction || seen.has(hex.index)) continue;
+    const province = detectProvince(state, hex);
+    for (const h of province) seen.add(h.index);
+    for (const h of province) {
+      const hasEnemyNear = activeNeighbors(state, h).some((n) => n.fraction !== h.fraction);
+      if (hasEnemyNear && nextRandom(state) < power) h.fraction = randomFraction(state);
+    }
+  }
+}
+
+/** Original slay applyBalanceMeasures (later factions get small compensations). */
+function applySlayBalanceMeasures(state: GameState) {
+  const n = state.config.playerCount;
+  giveAdvantageSlay(state, n - 1, 0.053);
+  giveAdvantageSlay(state, n - 2, 0.033);
+  if (n >= 5) {
+    giveAdvantageSlay(state, 2, 0.0165);
+  } else {
+    giveAdvantageSlay(state, 1, 0.0065);
+    giveAdvantageSlay(state, n - 1, 0.01);
+  }
+  giveDisadvantageSlay(state, 0, 0.048);
+}
+
+/**
+ * Every fraction must own at least one real (2+) province or it would be
+ * dead before its first turn. The original only patches fraction 0
+ * (checkToFixNoPlayerProblem) — a legacy defect we correct for all players.
+ */
+function ensureEveryFractionViable(state: GameState) {
   for (let p = 0; p < state.config.playerCount; p++) {
     if (hasRealProvince(state, p)) continue;
     const active = state.hexes.filter((h) => h.active);
@@ -448,6 +648,20 @@ function slayBalance(state: GameState) {
       neighbors[randomInt(state, neighbors.length)].fraction = p;
     }
   }
+}
+
+function slayBalance(state: GameState) {
+  ensureEveryFractionViable(state);
+  // The original skips the rest below 4 players ("to prevent infinite
+  // loop"): with few fractions every cut hex lands on the same opponent
+  // and the map degenerates. Keep the raw symmetric assignment.
+  if (state.config.playerCount < 4) return;
+  spawnManySmallProvinces(state);
+  cutProvincesToSmallSizes(state, false);
+  achieveFairNumberOfProvinces(state);
+  applySlayBalanceMeasures(state);
+  // The random measures above can strand a fraction; re-check viability.
+  ensureEveryFractionViable(state);
 }
 
 function hasRealProvince(state: GameState, fraction: number): boolean {
