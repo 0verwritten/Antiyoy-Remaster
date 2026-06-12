@@ -20,7 +20,7 @@ import {
 } from "../game/engine";
 import { aiTakeTurn } from "../game/ai";
 import type { GameConfig, GameState, Province } from "../game/types";
-import { fitToIsland, HEX_SIZE, makeCamera, screenToWorld, type Camera } from "../camera";
+import { fitToIsland, HEX_SIZE, makeCamera, screenToWorld, zoomAt, type Camera } from "../camera";
 import { pixelToHex, type Point } from "../hex";
 import { renderBoard, type RenderState } from "../render";
 import { aiDelayMs, settings } from "../settings";
@@ -195,6 +195,25 @@ export function GameScreen(props: GameScreenProps) {
     forceRender();
     refreshUi();
   }, [stateRef, forceRender, refreshUi, recordAction]);
+
+  const zoomCamera = useCallback((factor: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    camRef.current = zoomAt(
+      camRef.current,
+      { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 },
+      factor
+    );
+    dirtyRef.current = true;
+  }, []);
+
+  const fitCamera = useCallback(() => {
+    const canvas = canvasRef.current;
+    const st = stateRef.current;
+    if (!canvas || !st) return;
+    camRef.current = fitToIsland(st, canvas.clientWidth, canvas.clientHeight, HEX_SIZE);
+    dirtyRef.current = true;
+  }, [stateRef]);
 
   const runAiIfNeeded = useCallback(() => {
     const st = stateRef.current;
@@ -463,6 +482,21 @@ export function GameScreen(props: GameScreenProps) {
         if (e.key === "Escape") setPaused("none");
         return;
       }
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomCamera(1.2);
+        return;
+      }
+      if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomCamera(1 / 1.2);
+        return;
+      }
+      if (e.key === "0") {
+        e.preventDefault();
+        fitCamera();
+        return;
+      }
       if (aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
       if (e.key === "Escape") {
         clearSelection();
@@ -483,7 +517,7 @@ export function GameScreen(props: GameScreenProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stateRef, screen.kind, paused, clearSelection, doEndTurn, doUndo, refreshUi]);
+  }, [stateRef, screen.kind, paused, clearSelection, doEndTurn, doUndo, refreshUi, zoomCamera, fitCamera]);
 
   // Selected province for the HUD.
   const selectedProvince = currentSelectedProvince(state, highlightProvinceRef.current);
@@ -515,6 +549,12 @@ export function GameScreen(props: GameScreenProps) {
 
       {/* Top bar */}
       <TopBar state={state} onMenu={() => setPaused("menu")} />
+
+      <ZoomControls
+        onZoomIn={() => zoomCamera(1.2)}
+        onZoomOut={() => zoomCamera(1 / 1.2)}
+        onFit={fitCamera}
+      />
 
       {/* AI thinking indicator */}
       {aiThinkingRef.current && (
@@ -691,6 +731,32 @@ function TopBar({
         className="min-h-[40px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow hover:brightness-95"
       >
         Menu
+      </button>
+    </div>
+  );
+}
+
+function ZoomControls({
+  onZoomIn,
+  onZoomOut,
+  onFit,
+}: {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFit: () => void;
+}) {
+  const buttonClass =
+    "flex min-h-[44px] min-w-[44px] items-center justify-center bg-[#f0eee3] px-3 font-black text-[#3a3a33] shadow hover:brightness-95 active:bg-[#dedbc8]";
+  return (
+    <div className="absolute right-3 top-16 flex flex-col overflow-hidden rounded-xl" aria-label="Map zoom controls">
+      <button type="button" onClick={onZoomIn} title="Zoom in (+)" aria-label="Zoom in" className={`${buttonClass} text-2xl`}>
+        +
+      </button>
+      <button type="button" onClick={onFit} title="Fit map (0)" className={`${buttonClass} border-y border-black/10 text-xs`}>
+        Fit
+      </button>
+      <button type="button" onClick={onZoomOut} title="Zoom out (-)" aria-label="Zoom out" className={`${buttonClass} text-2xl`}>
+        -
       </button>
     </div>
   );
