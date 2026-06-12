@@ -1,6 +1,6 @@
 // Headless engine/AI verification: runs AI-vs-AI games in both modes and
 // checks invariants. Run from repo root: npx tsx devtools/sim.ts
-import { applyAction, createGame, setActionObserver } from "../web/client/game/engine";
+import { applyAction, createGame, getBuyZone, marchUnitsToHex, setActionObserver } from "../web/client/game/engine";
 import { aiTakeTurn } from "../web/client/game/ai";
 import { NEUTRAL_FRACTION } from "../web/client/game/constants";
 import type { GameState } from "../web/client/game/types";
@@ -68,4 +68,27 @@ for (const mode of ["antiyoy", "slay"] as const) {
     );
   }
 }
+// Hold-to-march: a bought unit walks to the marched-to tile through own land.
+{
+  const st = createGame({ mapSize: "medium", playerCount: 2, humanCount: 2, seed: 777, mode: "slay" });
+  // Pick a province big enough to hold a unit, a destination and the capital.
+  const prov = st.provinces.find((p) => {
+    if (p.fraction !== 0 || p.hexes.length < 4) return false;
+    return getBuyZone(st, { ...p, money: 100 }, 1).some((h) => p.hexes.includes(h));
+  })!;
+  prov.money = 100;
+  const spot = getBuyZone(st, prov, 1).find((h) => prov.hexes.includes(h))!;
+  const buy = applyAction(st, { type: "buyUnit", provinceId: prov.id, strength: 1, target: spot });
+  if (!buy.ok) throw new Error(`march test: buy failed: ${buy.reason}`);
+  const provAfter = st.provinces.find((p) => p.id === prov.id)!;
+  const dest = provAfter.hexes.find(
+    (h) => h !== spot && !st.hexes[h].unit && st.hexes[h].obj !== "town"
+  )!;
+  const moves = marchUnitsToHex(st, provAfter, dest);
+  if (moves < 1) throw new Error("march test: no unit moved");
+  if (!st.hexes[dest].unit) throw new Error("march test: unit did not reach the target tile");
+  check(st, "march");
+  console.log(`march: ${moves} unit(s) marched to target`);
+}
+
 console.log("ALL INVARIANTS PASSED");

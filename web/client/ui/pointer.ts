@@ -1,16 +1,21 @@
 // Unified mouse/touch board controls via Pointer Events: pan, pinch/wheel
-// zoom, and tap detection.
+// zoom, tap and long-press detection. Pan/wheel speeds honor the camera
+// sensitivity setting (the original's "sensitivity" preference).
 
 import { useEffect } from "preact/hooks";
 import { zoomAt, type Camera } from "../camera";
 import type { Point } from "../hex";
+import { settings } from "../settings";
+
+const LONG_PRESS_MS = 500; // original GameController.marchDelay
 
 export function usePointerControls(
   canvasRef: { current: HTMLCanvasElement | null },
   camRef: { current: Camera },
   onChange: () => void,
   onTap: (screenPt: Point) => void,
-  blocked: () => boolean
+  blocked: () => boolean,
+  onLongPress?: (screenPt: Point) => void
 ) {
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -21,10 +26,18 @@ export function usePointerControls(
     let startSingle: Point | null = null;
     let movedDist = 0;
     let pinchDist = 0;
+    let longPressTimer = 0;
 
     const local = (e: PointerEvent): Point => {
       const rect = canvas.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
+    const cancelLongPress = () => {
+      if (longPressTimer) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = 0;
+      }
     };
 
     const onDown = (e: PointerEvent) => {
@@ -36,7 +49,18 @@ export function usePointerControls(
         lastSingle = p;
         startSingle = p;
         movedDist = 0;
+        if (onLongPress) {
+          cancelLongPress();
+          longPressTimer = window.setTimeout(() => {
+            longPressTimer = 0;
+            if (pointers.size === 1 && movedDist < 6 && startSingle && !blocked()) {
+              movedDist += 999; // a long press is never a tap
+              onLongPress(startSingle);
+            }
+          }, LONG_PRESS_MS);
+        }
       } else if (pointers.size === 2) {
+        cancelLongPress();
         const pts = [...pointers.values()];
         pinchDist = dist(pts[0], pts[1]);
       }
@@ -49,14 +73,16 @@ export function usePointerControls(
       pointers.set(e.pointerId, p);
 
       if (pointers.size === 1 && lastSingle) {
+        const sens = settings.cameraSensitivity || 1;
         const dx = p.x - lastSingle.x;
         const dy = p.y - lastSingle.y;
         movedDist += Math.hypot(dx, dy);
+        if (movedDist >= 6) cancelLongPress();
         if (!blocked()) {
           camRef.current = {
             ...camRef.current,
-            x: camRef.current.x - dx / camRef.current.scale,
-            y: camRef.current.y - dy / camRef.current.scale,
+            x: camRef.current.x - (dx * sens) / camRef.current.scale,
+            y: camRef.current.y - (dy * sens) / camRef.current.scale,
           };
           onChange();
         }
@@ -77,6 +103,7 @@ export function usePointerControls(
     const onUp = (e: PointerEvent) => {
       if (!pointers.has(e.pointerId)) return;
       e.preventDefault();
+      cancelLongPress();
       const wasSingle = pointers.size === 1;
       pointers.delete(e.pointerId);
       try {
@@ -100,7 +127,8 @@ export function usePointerControls(
       if (blocked()) return;
       const rect = canvas.getBoundingClientRect();
       const pivot = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const step = 1 + 0.12 * (settings.cameraSensitivity || 1);
+      const factor = e.deltaY < 0 ? step : 1 / step;
       camRef.current = zoomAt(camRef.current, pivot, factor);
       onChange();
     };
@@ -111,13 +139,14 @@ export function usePointerControls(
     canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => {
+      cancelLongPress();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [canvasRef, camRef, onChange, onTap, blocked]);
+  }, [canvasRef, camRef, onChange, onTap, blocked, onLongPress]);
 }
 
 function dist(a: Point, b: Point): number {

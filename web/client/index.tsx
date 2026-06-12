@@ -5,6 +5,7 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import { createGame } from "./game/engine";
 import type { GameConfig, GameState } from "./game/types";
+import { settings } from "./settings";
 import type { Screen } from "./screens/model";
 import { MainMenuScreen } from "./screens/main";
 import { SkirmishScreen } from "./screens/skirmish";
@@ -72,7 +73,11 @@ export function App() {
     case "main":
       return (
         <MainMenuScreen
-          canResume={stateRef.current !== null && stateRef.current.winner === null}
+          canResume={
+            settings.showResumeButton &&
+            stateRef.current !== null &&
+            stateRef.current.winner === null
+          }
           onPlay={() => setScreen({ kind: "skirmish" })}
           onResume={resumeGame}
           onSettings={() => setScreen({ kind: "settings" })}

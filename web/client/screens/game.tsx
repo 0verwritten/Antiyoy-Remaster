@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { PRICE_STRONG_TOWER, PRICE_TOWER } from "../game/constants";
 import {
   applyAction,
+  findNextReadyUnit,
   getBuildZone,
   getBuyZone,
   getFarmPrice,
@@ -13,6 +14,7 @@ import {
   getProvinceProfit,
   getUnitPrice,
   isHumanTurn,
+  marchUnitsToHex,
   setActionObserver,
   type ActionEvent,
 } from "../game/engine";
@@ -240,10 +242,36 @@ export function GameScreen(props: GameScreenProps) {
     runAiIfNeeded();
   }, [stateRef, clearSelection, forceRender, runAiIfNeeded]);
 
-  // ---- pointer interaction (pan/zoom/tap) ----
-  usePointerControls(canvasRef, camRef, () => {
-    dirtyRef.current = true;
-  }, (screenPt) => onTap(screenPt), () => aiThinkingRef.current || screen.kind !== "game" || paused !== "none");
+  // ---- pointer interaction (pan/zoom/tap/long-press march) ----
+  usePointerControls(
+    canvasRef,
+    camRef,
+    () => {
+      dirtyRef.current = true;
+    },
+    (screenPt) => onTap(screenPt),
+    () => aiThinkingRef.current || screen.kind !== "game" || paused !== "none",
+    (screenPt) => onLongPress(screenPt)
+  );
+
+  /** Hold-to-march (original long_tap_to_move): selected province's units walk to the held tile. */
+  function onLongPress(screenPt: Point) {
+    if (!settings.holdToMarch) return;
+    const st = stateRef.current;
+    if (!st || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+    const world = screenToWorld(camRef.current, screenPt);
+    const idx = pixelToHex(st, world, HEX_SIZE);
+    if (idx < 0) return;
+    const prov = st.provinces.find(
+      (p) => p.id === highlightProvinceRef.current && p.fraction === st.turn
+    );
+    if (!prov || !prov.hexes.includes(idx)) return;
+    if (!prov.hexes.some((h) => st.hexes[h].unit?.readyToMove)) return;
+    pushUndo();
+    const moves = marchUnitsToHex(st, prov, idx);
+    if (moves === 0) undoRef.current.pop();
+    afterAction(st, prov.id);
+  }
 
   function onTap(screenPt: Point) {
     const st = stateRef.current;
@@ -310,6 +338,11 @@ export function GameScreen(props: GameScreenProps) {
         // Movement may rebuild provinces; recompute highlight by hex.
         const prov = getProvinceByHex(st, idx);
         afterAction(st, prov ? prov.id : -1);
+        // Original "automatic transition": jump to the next useful ready unit.
+        if (settings.autoTransition) {
+          const next = findNextReadyUnit(st, prov ? prov.id : -1);
+          if (next >= 0) selectUnit(st, next);
+        }
         return;
       }
       // Tap own ready unit -> reselect it.
@@ -465,14 +498,14 @@ export function GameScreen(props: GameScreenProps) {
         </div>
       )}
 
-      {/* Undo button (original icon), bottom-left */}
+      {/* Undo and end-turn buttons (original icons); corners swap in left-handed mode */}
       {human && (
         <button
           type="button"
           onClick={doUndo}
           disabled={undoRef.current.length === 0}
           title="Undo (U)"
-          className={`absolute bottom-4 left-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none ${
+          className={`absolute bottom-4 ${settings.leftHanded ? "right-4" : "left-4"} flex h-14 w-14 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none ${
             undoRef.current.length === 0 ? "opacity-40" : ""
           }`}
         >
@@ -480,13 +513,12 @@ export function GameScreen(props: GameScreenProps) {
         </button>
       )}
 
-      {/* End turn button (original icon), bottom-right */}
       {human && (
         <button
           type="button"
           onClick={doEndTurn}
           title="End turn (E)"
-          className="absolute bottom-4 right-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none"
+          className={`absolute bottom-4 ${settings.leftHanded ? "left-4" : "right-4"} flex h-16 w-16 items-center justify-center rounded-full bg-[#f0eee3] shadow-[0_3px_0_rgba(0,0,0,0.3)] transition active:translate-y-[2px] active:shadow-none`}
         >
           <img src={ICON_ENDTURN_URL} alt="End turn" className="h-10 w-10" />
         </button>

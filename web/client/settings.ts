@@ -9,8 +9,18 @@ export interface Settings {
   showAllBorders: boolean;
   /** Ready-unit jump animation. */
   unitAnimations: boolean;
-  /** Ask before ending the turn. */
+  /** Ask before ending the turn (original "cautious end turn"). */
   confirmEndTurn: boolean;
+  /** Camera pan/zoom speed multiplier (original sensitivity, index/6, default 1.0). */
+  cameraSensitivity: number;
+  /** Long-press a tile of the selected province to march its units there. */
+  holdToMarch: boolean;
+  /** Swap the undo and end-turn corners for left-handed play. */
+  leftHanded: boolean;
+  /** Show the Resume button on the main menu when a game is running. */
+  showResumeButton: boolean;
+  /** After a unit moves, automatically select the next useful ready unit. */
+  autoTransition: boolean;
 }
 
 const KEY = "antiyoy.settings";
@@ -25,6 +35,11 @@ const DEFAULTS: Settings = {
   showAllBorders: false,
   unitAnimations: true,
   confirmEndTurn: false,
+  cameraSensitivity: 1,
+  holdToMarch: true,
+  leftHanded: false,
+  showResumeButton: true,
+  autoTransition: false,
 };
 
 /** Upgrades any previously stored payload to the current shape. */
@@ -62,6 +77,11 @@ export function saveSettings() {
   } catch {
     /* private browsing etc. — settings just won't persist */
   }
+}
+
+export function resetSettings() {
+  Object.assign(settings, DEFAULTS);
+  saveSettings();
 }
 
 export function aiDelayMs(): number {

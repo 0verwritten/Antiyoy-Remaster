@@ -638,4 +638,77 @@ export function getUnitPrice(strength: number): number {
   return PRICE_UNIT * strength;
 }
 
+/**
+ * Original hold-to-march (MassMarchManager): every ready unit of the
+ * province walks toward `target` through the province's own land — no
+ * attacks, only empty or tree tiles, sideways moves allowed. Each step is
+ * an ordinary moveUnit action, so undo/replay observe it normally.
+ * Returns the number of units moved.
+ */
+export function marchUnitsToHex(state: GameState, province: Province, target: number): number {
+  const targetHex = state.hexes[target];
+  if (!targetHex.active || targetHex.fraction !== province.fraction) return 0;
+  // BFS distance from the target across same-fraction connected land.
+  const dist = new Map<number, number>([[target, 0]]);
+  const queue = [targetHex];
+  for (let i = 0; i < queue.length; i++) {
+    const d = dist.get(queue[i].index)!;
+    for (const n of queue[i].neighbors) {
+      const nh = state.hexes[n];
+      if (nh.active && nh.fraction === province.fraction && !dist.has(n)) {
+        dist.set(n, d + 1);
+        queue.push(nh);
+      }
+    }
+  }
+  const unitHexes = province.hexes.filter((h) => state.hexes[h].unit?.readyToMove);
+  let moves = 0;
+  for (const from of unitHexes) {
+    if (!dist.has(from)) continue;
+    const fromHex = state.hexes[from];
+    if (!fromHex.unit?.readyToMove) continue; // merged into earlier marcher
+    const zone = getMoveZone(state, from);
+    let best = -1;
+    let bestD = Infinity;
+    for (const z of zone) {
+      const h = state.hexes[z];
+      if (h.fraction !== province.fraction || h.unit) continue;
+      if (h.obj !== "none" && h.obj !== "pine" && h.obj !== "palm") continue;
+      const d = dist.get(z);
+      if (d !== undefined && d < bestD) {
+        bestD = d;
+        best = z;
+      }
+    }
+    if (best >= 0 && best !== from) {
+      if (applyAction(state, { type: "moveUnit", from, to: best }).ok) moves++;
+    }
+  }
+  return moves;
+}
+
+/**
+ * Next ready unit worth selecting (original AutomaticTransitionWorker,
+ * simplified): prefer the current province, skip units whose move zone
+ * contains only own land. Returns a hex index or -1.
+ */
+export function findNextReadyUnit(state: GameState, preferProvinceId: number): number {
+  const candidates: number[] = [];
+  const preferred = state.provinces.find((p) => p.id === preferProvinceId);
+  const pools = preferred
+    ? [preferred, ...state.provinces.filter((p) => p.fraction === state.turn && p !== preferred)]
+    : state.provinces.filter((p) => p.fraction === state.turn);
+  for (const province of pools) {
+    if (province.fraction !== state.turn) continue;
+    for (const h of province.hexes) {
+      const hex = state.hexes[h];
+      if (!hex.unit?.readyToMove) continue;
+      const zone = getMoveZone(state, h);
+      if (zone.some((z) => state.hexes[z].fraction !== state.turn)) return h;
+      candidates.push(h);
+    }
+  }
+  return candidates.length > 0 ? candidates[0] : -1;
+}
+
 export { PRICE_TOWER as TOWER_PRICE, PRICE_STRONG_TOWER as STRONG_TOWER_PRICE };
