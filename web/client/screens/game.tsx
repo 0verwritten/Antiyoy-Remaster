@@ -39,7 +39,9 @@ import { usePointerControls } from "../ui/pointer";
 import { MenuButton } from "../ui/controls";
 import { SettingsPanel } from "../ui/settings-panel";
 import { PassScreen } from "./pass";
-import { VictoryOverlay } from "./victory";
+import { VictoryOverlay, CampaignOverlay } from "./victory";
+import { evaluateCampaign, CAMPAIGN_LEVEL_COUNT } from "../game/campaign";
+import { markLevelCompleted } from "../campaign-storage";
 import { ReplayViewer, type ReplayStep } from "./replay";
 
 export interface GameScreenProps {
@@ -53,6 +55,9 @@ export interface GameScreenProps {
   onPlayAgain: () => void;
   /** Restored replay history when this game came from a saved record. */
   initialReplay?: { initial: GameState; steps: ReplayStep[] } | null;
+  /** Campaign hooks (present only for campaign games). */
+  onCampaignExit?: () => void;
+  onCampaignPlayLevel?: (level: number) => void;
 }
 
 const UNDO_STACK_LIMIT = 50;
@@ -252,9 +257,12 @@ export function GameScreen(props: GameScreenProps) {
         aiThinkingRef.current = false;
         return;
       }
-      if (s.winner !== null || isHumanTurn(s)) {
+      // Campaign defeat: the human is gone, so stop rather than watching the
+      // AIs play out the rest.
+      const campaignDefeat = s.session?.source === "campaign" && !s.alive[0];
+      if (s.winner !== null || isHumanTurn(s) || campaignDefeat) {
         aiThinkingRef.current = false;
-        if (s.winner === null && s.config.humanCount >= 2 && isHumanTurn(s)) {
+        if (s.winner === null && !campaignDefeat && s.config.humanCount >= 2 && isHumanTurn(s)) {
           setScreen({ kind: "pass", fraction: s.turn });
         }
         forceRender();
@@ -548,6 +556,20 @@ export function GameScreen(props: GameScreenProps) {
     );
   }
 
+  // Campaign objective state. A campaign level can end before a single
+  // winner emerges (the human dies but the AIs fight on), so we evaluate the
+  // objective directly rather than waiting for state.winner.
+  const campaignLevel =
+    state.session?.source === "campaign" ? state.session.campaignLevel ?? null : null;
+  const campaignStatus = campaignLevel != null ? evaluateCampaign(state) : "ongoing";
+  const campaignDoneRef = useRef(false);
+  useEffect(() => {
+    if (campaignLevel != null && campaignStatus === "won" && !campaignDoneRef.current) {
+      campaignDoneRef.current = true;
+      markLevelCompleted(campaignLevel);
+    }
+  }, [campaignLevel, campaignStatus]);
+
   const human = isHumanTurn(state) && !aiThinkingRef.current && state.winner === null;
 
   return (
@@ -668,7 +690,9 @@ export function GameScreen(props: GameScreenProps) {
               </MenuButton>
               <MenuButton
                 onClick={() => {
-                  if (confirm("Restart this game from the beginning?")) props.onRestart();
+                  if (!confirm("Restart this game from the beginning?")) return;
+                  if (campaignLevel != null) props.onCampaignPlayLevel?.(campaignLevel);
+                  else props.onRestart();
                 }}
               >
                 Restart
@@ -686,8 +710,21 @@ export function GameScreen(props: GameScreenProps) {
         </div>
       )}
 
-      {/* Victory overlay */}
-      {state.winner !== null && (
+      {/* Campaign end overlay (win/lose), takes priority for campaign games */}
+      {campaignLevel != null && campaignStatus !== "ongoing" && (
+        <CampaignOverlay
+          level={campaignLevel}
+          won={campaignStatus === "won"}
+          hasNext={campaignLevel < CAMPAIGN_LEVEL_COUNT}
+          onRetry={() => props.onCampaignPlayLevel?.(campaignLevel)}
+          onNext={() => props.onCampaignPlayLevel?.(campaignLevel + 1)}
+          onReplay={() => setShowReplay(true)}
+          onMenu={() => props.onCampaignExit?.()}
+        />
+      )}
+
+      {/* Skirmish victory overlay */}
+      {campaignLevel == null && state.winner !== null && (
         <VictoryOverlay
           label={fractionLabel(state, state.winner)}
           color={displayFractionColor(state.config, state.winner)}

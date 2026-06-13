@@ -9,12 +9,15 @@ import { settings } from "./settings";
 import { latestSave, type SaveRecord } from "./game-storage";
 import type { Screen } from "./screens/model";
 import { MainMenuScreen } from "./screens/main";
+import { ChooseModeScreen } from "./screens/choose-mode";
 import { SkirmishScreen } from "./screens/skirmish";
+import { CampaignScreen } from "./screens/campaign";
 import { SettingsScreen } from "./screens/settings";
 import { AboutScreen } from "./screens/about";
 import { LoadScreen } from "./screens/load";
 import { ReplaysScreen } from "./screens/replays";
 import { GameScreen } from "./screens/game";
+import { createCampaignLevelGame } from "./game/campaign";
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
 // game lives at antiyoy.lakebed.app only.
@@ -72,6 +75,19 @@ export function App() {
     [forceRender]
   );
 
+  const startCampaignLevel = useCallback(
+    (level: number) => {
+      const state = createCampaignLevelGame(level);
+      configRef.current = state.config;
+      stateRef.current = state;
+      loadedReplayRef.current = null;
+      gameIdRef.current++;
+      setScreen({ kind: "game" });
+      forceRender();
+    },
+    [forceRender]
+  );
+
   const enterGameScreen = useCallback((state: GameState) => {
     // Hotseat: never show a player's board before the pass screen.
     if (state.config.humanCount >= 2 && state.turn < state.config.humanCount) {
@@ -115,7 +131,7 @@ export function App() {
             settings.showResumeButton &&
             ((stateRef.current !== null && stateRef.current.winner === null) || hasSavedGame)
           }
-          onPlay={() => setScreen({ kind: "skirmish" })}
+          onPlay={() => setScreen({ kind: "chooseMode" })}
           onResume={resumeGame}
           onLoad={() => setScreen({ kind: "load" })}
           onReplays={() => setScreen({ kind: "replays" })}
@@ -123,11 +139,26 @@ export function App() {
           onAbout={() => setScreen({ kind: "about" })}
         />
       );
+    case "chooseMode":
+      return (
+        <ChooseModeScreen
+          onSkirmish={() => setScreen({ kind: "skirmish" })}
+          onCampaign={() => setScreen({ kind: "campaign" })}
+          onBack={() => setScreen({ kind: "main" })}
+        />
+      );
     case "skirmish":
       return (
         <SkirmishScreen
           onPlay={startGame}
-          onBack={() => setScreen({ kind: "main" })}
+          onBack={() => setScreen({ kind: "chooseMode" })}
+        />
+      );
+    case "campaign":
+      return (
+        <CampaignScreen
+          onBack={() => setScreen({ kind: "chooseMode" })}
+          onPlayLevel={startCampaignLevel}
         />
       );
     case "settings":
@@ -148,6 +179,8 @@ export function App() {
           configRef={configRef}
           forceRender={forceRender}
           initialReplay={loadedReplayRef.current}
+          onCampaignExit={() => setScreen({ kind: "campaign" })}
+          onCampaignPlayLevel={startCampaignLevel}
           onMenu={() => setScreen({ kind: "main" })}
           onRestart={() => {
             const cfg = configRef.current;

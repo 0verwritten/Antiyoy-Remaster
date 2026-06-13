@@ -15,9 +15,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packDir = join(root, "core/src/yio/tro/antiyoy/gameplay/campaign");
 const outPath = join(root, "web/client/game/__generated__/campaign-data.ts");
 
-// Only the first HARD_LEVELS_START levels are the curated 1..24 campaign;
-// convert everything available, the campaign UI decides what to expose.
-const MAX_LEVEL = 96;
+// MVP campaign is levels 1..24; only the fixed (stored) levels in that range
+// need shipping, and only those keep the client bundle under budget. Stage 8
+// (full campaign) will introduce a more compact encoding before importing the
+// rest. Override with CONVERT_MAX_LEVEL to regenerate a wider set.
+const MAX_LEVEL = Number(process.env.CONVERT_MAX_LEVEL ?? 24);
 
 const caseRe = /case\s+(\d+)\s*:\s*return\s+"((?:[^"\\]|\\.)*)"\s*;/g;
 

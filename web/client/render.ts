@@ -35,6 +35,10 @@ let atlasReady = false;
 atlas.onload = () => {
   atlasReady = true;
 };
+// The atlas is served cross-origin (CDN). Request it with CORS so drawing it
+// onto the board canvas does not taint the canvas (the smoke test reads back
+// pixels). jsDelivr sends Access-Control-Allow-Origin: *.
+atlas.crossOrigin = "anonymous";
 atlas.src = ATLAS_URL;
 
 function drawSprite(
