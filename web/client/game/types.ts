@@ -84,6 +84,52 @@ export interface GameConfig {
   diplomacy?: boolean;
 }
 
+/** Pairwise diplomatic relation (original: NEUTRAL / FRIEND / ENEMY). */
+export type Relation = "neutral" | "friend" | "war";
+
+/** A timed diplomatic agreement; expires at round `expires`. */
+export interface DiploContract {
+  type: "friendship" | "peace" | "blackMark" | "subsidy";
+  a: Fraction;
+  b: Fraction;
+  /** Round at which the contract lapses. */
+  expires: number;
+  /** Subsidy only: `a` pays `b` this much per round (capped at pay time). */
+  subsidy?: number;
+}
+
+/** A pending offer from one player to another, awaiting accept/reject. */
+export interface DiploProposal {
+  id: number;
+  from: Fraction;
+  to: Fraction;
+  kind: "friendship" | "stopWar" | "subsidy" | "gift";
+  /** Money amount for gift/subsidy. */
+  amount?: number;
+}
+
+export interface DiploLogEntry {
+  round: number;
+  from: Fraction;
+  to: Fraction;
+  text: string;
+}
+
+export interface DiplomacyState {
+  /** relations[a][b] — always symmetric. */
+  relations: Relation[][];
+  /** Rounds remaining before war between a,b can be ended again. */
+  stopWarCooldown: number[][];
+  /** Fractions currently black-marked (open season). */
+  blackMarks: Fraction[];
+  contracts: DiploContract[];
+  proposals: DiploProposal[];
+  log: DiploLogEntry[];
+  nextProposalId: number;
+  /** Per-fraction reputation/attitude, consumed by the diplomatic AI. */
+  reputation: number[];
+}
+
 /** Win condition for a scenario/campaign level. */
 export type Objective =
   | { type: "destroyEveryone" }
@@ -102,6 +148,8 @@ export interface GameState {
   config: GameConfig;
   /** Provenance + objective. Omitted on legacy/older saves (treated as generated). */
   session?: GameSession;
+  /** Diplomacy state, present only when config.diplomacy is on. */
+  diplomacy?: DiplomacyState;
   /** All tiles, including inactive water tiles. Index = HexTile.index. */
   hexes: HexTile[];
   provinces: Province[];
@@ -137,7 +185,13 @@ export type Action =
       provinceId: number;
       target: number;
     }
-  | { type: "endTurn" };
+  | { type: "endTurn" }
+  // --- diplomacy (only valid when config.diplomacy is on); actor = current turn ---
+  | { type: "declareWar"; target: Fraction }
+  | { type: "setBlackMark"; target: Fraction }
+  | { type: "proposeExchange"; to: Fraction; kind: "friendship" | "stopWar" | "subsidy" | "gift"; amount?: number }
+  | { type: "acceptExchange"; proposalId: number }
+  | { type: "rejectExchange"; proposalId: number };
 
 export interface ActionResult {
   ok: boolean;

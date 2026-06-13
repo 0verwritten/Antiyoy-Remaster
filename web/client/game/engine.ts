@@ -35,6 +35,31 @@ import type {
   Province,
 } from "./types";
 import type { Scenario } from "./scenario";
+import {
+  acceptExchange,
+  canAttackFraction,
+  declareWar,
+  diplomaticVictor,
+  initDiplomacy,
+  onFractionEliminated,
+  processDiplomacyRound,
+  proposeExchange,
+  rejectExchange,
+  setBlackMark,
+} from "./diplomacy";
+
+// Re-export the diplomacy surface so UI/AI import everything from the engine.
+export {
+  acceptExchange,
+  canAttackFraction,
+  declareWar,
+  diplomaticVictor,
+  getRelation,
+  proposeExchange,
+  rejectExchange,
+  setBlackMark,
+  transferMoney,
+} from "./diplomacy";
 
 export interface ActionEvent {
   action: Action;
@@ -144,6 +169,7 @@ export function createGame(config: GameConfig): GameState {
     nextProvinceId: 1,
   };
 
+  if (config.diplomacy) state.diplomacy = initDiplomacy(config.playerCount);
   generateMap(state); // original Antiyoy island + province generator
   rebuildAllProvinces(state, true);
   beginTurn(state); // income for player 0
@@ -198,6 +224,7 @@ export function createScenarioGame(scenario: Scenario, session?: GameSession): G
     version: 0,
     nextProvinceId: 1,
   };
+  if (config.diplomacy) state.diplomacy = initDiplomacy(scenario.playerCount);
 
   // Money carried per (capital) hex, applied after provinces are detected.
   const moneyByCoord = new Map<string, number>();
@@ -335,7 +362,10 @@ function handleDetachedTile(state: GameState, hex: HexTile) {
 }
 
 function ensureCapital(state: GameState, province: Province) {
-  if (province.capital >= 0 && state.hexes[province.capital].obj === "town") return;
+  if (province.capital >= 0 && state.hexes[province.capital].obj === "town") {
+    pruneExtraTowns(state, province);
+    return;
+  }
   // Adopt a pre-placed town (scenarios/editor specify capitals explicitly);
   // generated maps have no towns, so this branch is skipped there. Prefer a
   // town without a unit on it.
@@ -489,8 +519,13 @@ export function getMoveZone(state: GameState, from: number): number[] {
           if (canLandOn(tile, strength)) zone.add(n);
         }
       } else {
-        // Border tile: capturing costs one step.
-        if (d + 1 <= UNIT_MOVE_LIMIT && canUnitAttackHex(state, strength, tile)) {
+        // Border tile: capturing costs one step. Diplomacy forbids attacking
+        // fractions you are not at war with (isolated hexes included).
+        if (
+          d + 1 <= UNIT_MOVE_LIMIT &&
+          canAttackFraction(state, fraction, tile.fraction) &&
+          canUnitAttackHex(state, strength, tile)
+        ) {
           dist.set(n, d + 1);
           zone.add(n);
         }
@@ -508,7 +543,11 @@ export function getBuyZone(state: GameState, province: Province, strength: numbe
     const tile = state.hexes[h];
     if (canLandOn(tile, strength)) zone.add(h);
     for (const n of activeNeighbors(state, tile)) {
-      if (n.fraction !== province.fraction && canUnitAttackHex(state, strength, n)) {
+      if (
+        n.fraction !== province.fraction &&
+        canAttackFraction(state, province.fraction, n.fraction) &&
+        canUnitAttackHex(state, strength, n)
+      ) {
         zone.add(n.index);
       }
     }
@@ -561,6 +600,32 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     case "endTurn":
       result = doEndTurn(state);
       break;
+    case "declareWar":
+      result = declareWar(state, actor, action.target)
+        ? { ok: true }
+        : { ok: false, reason: "cannot declare war" };
+      break;
+    case "setBlackMark":
+      result = setBlackMark(state, actor, action.target)
+        ? { ok: true }
+        : { ok: false, reason: "cannot black mark" };
+      break;
+    case "proposeExchange":
+      result =
+        proposeExchange(state, actor, action.to, action.kind, action.amount) >= 0
+          ? { ok: true }
+          : { ok: false, reason: "cannot propose" };
+      break;
+    case "acceptExchange":
+      result = acceptExchange(state, action.proposalId)
+        ? { ok: true }
+        : { ok: false, reason: "no such proposal" };
+      break;
+    case "rejectExchange":
+      result = rejectExchange(state, action.proposalId)
+        ? { ok: true }
+        : { ok: false, reason: "no such proposal" };
+      break;
   }
   if (result.ok) {
     state.version++;
@@ -586,10 +651,12 @@ function doMoveUnit(state: GameState, from: number, to: number): ActionResult {
   const target = state.hexes[to];
   const isCapture = target.fraction !== source.fraction;
   const actingProvince = getProvinceByHex(state, from);
+  const mergesWithReadyUnit = !isCapture && target.unit?.readyToMove === true;
   source.unit = null;
   if (isCapture) target.unit = null; // the defender dies, never merges
-  // A unit that moved is spent for this turn (capture or reposition).
-  placeUnitOnHex(state, target, unit.strength, false, actingProvince);
+  // A normal move is spent. When two unmoved friendly units merge, the
+  // destination unit still contributes its unused move to the merged unit.
+  placeUnitOnHex(state, target, unit.strength, mergesWithReadyUnit, actingProvince);
   if (isCapture) {
     captureHex(state, target, state.turn);
   }
@@ -685,6 +752,7 @@ function doEndTurn(state: GameState): ActionResult {
   if (next <= state.turn) {
     state.round++;
     spreadTrees(state);
+    processDiplomacyRound(state); // subsidies, contract expiry, war cooldowns
   }
   state.turn = next;
   beginTurn(state);
@@ -743,13 +811,22 @@ function spreadTrees(state: GameState) {
 function checkElimination(state: GameState) {
   for (let p = 0; p < state.config.playerCount; p++) {
     if (!state.alive[p]) continue;
-    if (getProvincesOf(state, p).length === 0) state.alive[p] = false;
+    if (getProvincesOf(state, p).length === 0) {
+      state.alive[p] = false;
+      onFractionEliminated(state, p); // scrub diplomacy (no-op without diplomacy)
+    }
   }
   const survivors: number[] = [];
   for (let p = 0; p < state.config.playerCount; p++) {
     if (state.alive[p]) survivors.push(p);
   }
-  if (survivors.length === 1) state.winner = survivors[0];
+  if (survivors.length === 1) {
+    state.winner = survivors[0];
+    return;
+  }
+  // Diplomatic victory: the surviving players are all mutual friends.
+  const victor = diplomaticVictor(state);
+  if (victor !== null) state.winner = victor;
 }
 
 // ---------------------------------------------------------------- Convenience for UI

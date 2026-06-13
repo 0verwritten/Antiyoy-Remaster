@@ -14,6 +14,9 @@ function check(state: GameState, label: string) {
     if (!Number.isFinite(p.money)) throw new Error(`${label}: province ${p.id} money=${p.money}`);
     if (p.capital < 0 || state.hexes[p.capital].obj !== "town")
       throw new Error(`${label}: province ${p.id} bad capital`);
+    const towns = p.hexes.filter((h) => state.hexes[h].obj === "town");
+    if (towns.length !== 1)
+      throw new Error(`${label}: province ${p.id} has ${towns.length} capitals`);
     for (const h of p.hexes) {
       if (seen.has(h)) throw new Error(`${label}: hex ${h} in two provinces`);
       seen.add(h);
@@ -90,6 +93,30 @@ for (const mode of ["antiyoy", "slay"] as const) {
   if (!st.hexes[dest].unit) throw new Error("march test: unit did not reach the target tile");
   check(st, "march");
   console.log(`march: ${moves} unit(s) marched to target`);
+}
+
+// Merging two unmoved units preserves the destination unit's unused move.
+{
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 0 1 1 10#" +
+      "1 0 0 0 1 1 10#" +
+      "2 0 0 0 0 0 10#" +
+      "2 1 0 3 0 0 10#" +
+      "5 0 1 3 0 0 10#" +
+      "6 0 1 0 0 0 10",
+    "ready-unit-merge"
+  );
+  const st = createScenarioGame(scenario);
+  const from = st.hexes.find((h) => h.active && h.q === 0 && h.r === 0)!;
+  const merge = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!;
+  const onward = st.hexes.find((h) => h.active && h.q === 2 && h.r === 0)!;
+  const first = applyAction(st, { type: "moveUnit", from: from.index, to: merge.index });
+  if (!first.ok) throw new Error(`ready merge test: merge failed: ${first.reason}`);
+  if (!merge.unit?.readyToMove) throw new Error("ready merge test: merged unit cannot move");
+  const second = applyAction(st, { type: "moveUnit", from: merge.index, to: onward.index });
+  if (!second.ok) throw new Error(`ready merge test: onward move failed: ${second.reason}`);
+  console.log("ready merge: merged unit retained its move");
 }
 
 // Fog of war: the viewer sees their own land; some enemy/far land is hidden;
