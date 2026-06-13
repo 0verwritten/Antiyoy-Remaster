@@ -836,4 +836,48 @@ export function findNextReadyUnit(state: GameState, preferProvinceId: number): n
   return candidates.length > 0 ? candidates[0] : -1;
 }
 
+/**
+ * Fog of war visibility for `viewer` (original FogOfWarManager): each owned
+ * hex reveals nearby hexes up to a radius set by its content — empty 1, unit
+ * 2, tower 3, town 4, strong tower 5 — measured in hex steps, not propagating
+ * through water. Pure: derived from state, so it never needs serializing.
+ */
+export function computeVisibility(state: GameState, viewer: Fraction): Set<number> {
+  const visible = new Set<number>();
+  const radiusOf = (hex: HexTile): number => {
+    if (hex.unit) return 2;
+    switch (hex.obj) {
+      case "strongTower":
+        return 5;
+      case "town":
+        return 4;
+      case "tower":
+        return 3;
+      default:
+        return 1;
+    }
+  };
+  for (const source of state.hexes) {
+    if (!source.active || source.fraction !== viewer) continue;
+    // Per-source BFS; revisit a hex only if reached with more budget left.
+    const best = new Map<number, number>();
+    const queue: Array<{ idx: number; budget: number }> = [
+      { idx: source.index, budget: radiusOf(source) },
+    ];
+    while (queue.length > 0) {
+      const { idx, budget } = queue.shift()!;
+      const prev = best.get(idx);
+      if (prev !== undefined && prev >= budget) continue;
+      best.set(idx, budget);
+      visible.add(idx);
+      const hex = state.hexes[idx];
+      if (!hex.active || budget <= 0) continue; // reveal but don't see past water
+      for (const n of hex.neighbors) {
+        if ((best.get(n) ?? -1) < budget - 1) queue.push({ idx: n, budget: budget - 1 });
+      }
+    }
+  }
+  return visible;
+}
+
 export { PRICE_TOWER as TOWER_PRICE, PRICE_STRONG_TOWER as STRONG_TOWER_PRICE };

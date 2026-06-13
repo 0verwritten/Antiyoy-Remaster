@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { PRICE_STRONG_TOWER, PRICE_TOWER } from "../game/constants";
 import {
   applyAction,
+  computeVisibility,
   findNextReadyUnit,
   getBuildZone,
   getBuyZone,
@@ -111,6 +112,8 @@ export function GameScreen(props: GameScreenProps) {
 
   // --- camera fit on first mount ---
   const fittedRef = useRef(false);
+  // Fog visibility cache (recomputed only when the state version or viewer changes).
+  const fogCacheRef = useRef<{ version: number; viewer: number; set: Set<number> } | null>(null);
 
   // Track unmount so a pending AI chain stops with the screen.
   useEffect(() => {
@@ -153,6 +156,7 @@ export function GameScreen(props: GameScreenProps) {
 
       const pending = pendingRef.current;
       const rs: RenderState = buildRenderState(st, pending, selectedHexRef.current, highlightProvinceRef.current);
+      rs.fog = computeFog(st, fogCacheRef);
       // Always redraw (animations + simplicity).
       renderBoard(ctx, st, camRef.current, rs, cssW, cssH);
     };
@@ -919,6 +923,29 @@ function currentSelectedProvince(state: GameState, id: number): Province | null 
   if (!p) return null;
   if (p.fraction !== state.turn) return null;
   return p;
+}
+
+/**
+ * Visible-hex set for fog of war, memoized by state version + viewer. The
+ * viewer is the player whose turn it is when human; during AI turns in a
+ * single-player game, the human (fraction 0) keeps seeing their own fog.
+ * Spectator games (no humans) and fog-off games see everything (null).
+ */
+function computeFog(
+  state: GameState,
+  cache: { current: { version: number; viewer: number; set: Set<number> } | null }
+): Set<number> | null {
+  if (!state.config.fogOfWar || state.config.humanCount === 0) return null;
+  const viewer = isHumanTurn(state)
+    ? state.turn
+    : state.config.humanCount === 1
+      ? 0
+      : state.turn;
+  const c = cache.current;
+  if (c && c.version === state.version && c.viewer === viewer) return c.set;
+  const set = computeVisibility(state, viewer);
+  cache.current = { version: state.version, viewer, set };
+  return set;
 }
 
 function buildRenderState(

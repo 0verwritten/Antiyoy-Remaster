@@ -26,6 +26,8 @@ export interface RenderState {
   dimNonZone: boolean;
   /** Time in ms for animations. */
   now: number;
+  /** Fog of war: indices the viewer can see. null = no fog (see everything). */
+  fog?: Set<number> | null;
 }
 
 // --- sprite atlas ------------------------------------------------------------
@@ -150,11 +152,22 @@ export function renderBoard(
   }
   // Pass 2: territory borders (edges between different owners / water only).
   drawBorders(ctx, state, cam, rs, highlight);
-  // Pass 3: contents + units.
+  // Pass 3: contents + units (hidden on fogged tiles).
   for (const hex of state.hexes) {
     if (!hex.active) continue;
+    if (rs.fog && !rs.fog.has(hex.index)) continue;
     const dim = rs.dimNonZone && !(rs.zone && rs.zone.has(hex.index));
     drawContents(ctx, hex, cam, rs, dim);
+  }
+  // Fog overlay: darken active tiles the viewer cannot see.
+  if (rs.fog) {
+    ctx.fillStyle = "rgba(20,26,38,0.62)";
+    for (const hex of state.hexes) {
+      if (!hex.active || rs.fog.has(hex.index)) continue;
+      const { cx, cy, s } = tileScreen(hex, cam);
+      hexPath(ctx, cx, cy, s * 1.02);
+      ctx.fill();
+    }
   }
   // Pass 4: zone markers + selected-unit ring.
   if (rs.zone && rs.dimNonZone) {

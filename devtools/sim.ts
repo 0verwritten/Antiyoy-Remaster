@@ -1,6 +1,7 @@
 // Headless engine/AI verification: runs AI-vs-AI games in both modes and
 // checks invariants. Run from repo root: npx tsx devtools/sim.ts
-import { applyAction, createGame, getBuyZone, marchUnitsToHex, setActionObserver } from "../web/client/game/engine";
+import { applyAction, computeVisibility, createGame, createScenarioGame, getBuyZone, marchUnitsToHex, setActionObserver } from "../web/client/game/engine";
+import { parseLevelString } from "../web/client/game/scenario-codec";
 import { aiTakeTurn } from "../web/client/game/ai";
 import { NEUTRAL_FRACTION } from "../web/client/game/constants";
 import type { GameState } from "../web/client/game/types";
@@ -89,6 +90,41 @@ for (const mode of ["antiyoy", "slay"] as const) {
   if (!st.hexes[dest].unit) throw new Error("march test: unit did not reach the target tile");
   check(st, "march");
   console.log(`march: ${moves} unit(s) marched to target`);
+}
+
+// Fog of war: the viewer sees their own land; some enemy/far land is hidden;
+// a tower reveals strictly more than a bare hex.
+{
+  const st = createGame({ mapSize: "large", playerCount: 4, humanCount: 1, seed: 99, mode: "antiyoy", fogOfWar: true });
+  const vis = computeVisibility(st, 0);
+  let own = 0;
+  let hiddenActive = 0;
+  for (const h of st.hexes) {
+    if (!h.active) continue;
+    if (h.fraction === 0) {
+      own++;
+      if (!vis.has(h.index)) throw new Error("fog test: player cannot see their own land");
+    } else if (!vis.has(h.index)) {
+      hiddenActive++;
+    }
+  }
+  if (own === 0) throw new Error("fog test: player 0 has no land");
+  if (hiddenActive === 0) throw new Error("fog test: no active land is hidden");
+
+  // Radius semantics on a deterministic corridor: a strong tower (radius 5)
+  // at the province tip reveals strictly further down a neutral line than a
+  // bare hex (radius 1) would.
+  const corridor = parseLevelString(
+    "1 1 1 7/0 0 0 3 0 0 10#1 0 0 0 0 0 10#2 0 0 0 0 0 10#3 0 7 0 0 0 10#4 0 7 0 0 0 10#5 0 7 0 0 0 10#6 0 7 0 0 0 10#7 0 7 0 0 0 10",
+    "fog-corridor"
+  );
+  const cs = createScenarioGame(corridor);
+  const tip = cs.hexes.find((h) => h.q === 2 && h.r === 0 && h.active)!;
+  const before = computeVisibility(cs, 0).size;
+  tip.obj = "strongTower";
+  const after = computeVisibility(cs, 0).size;
+  if (after <= before) throw new Error("fog test: strong tower did not widen visibility");
+  console.log(`fog: ${hiddenActive} active hexes hidden from player; strong tower +${after - before} on corridor`);
 }
 
 console.log("ALL INVARIANTS PASSED");

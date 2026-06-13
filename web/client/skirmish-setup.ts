@@ -13,6 +13,7 @@ export interface SkirmishSetup {
   treePercentage: number;
   startingProvinces: 0 | 1 | 2 | 3 | 4;
   colorOffset: number;
+  fogOfWar: boolean;
 }
 
 const KEY = "antiyoy.skirmish";
@@ -27,6 +28,7 @@ export const DEFAULT_SETUP: SkirmishSetup = {
   treePercentage: 10,
   startingProvinces: 0,
   colorOffset: 0,
+  fogOfWar: false,
 };
 
 function migrate(raw: unknown): SkirmishSetup {
@@ -62,6 +64,7 @@ function migrate(raw: unknown): SkirmishSetup {
   if (typeof data.colorOffset === "number" && data.colorOffset >= 0 && data.colorOffset < 6) {
     out.colorOffset = Math.round(data.colorOffset);
   }
+  if (typeof data.fogOfWar === "boolean") out.fogOfWar = data.fogOfWar;
   return out;
 }
 

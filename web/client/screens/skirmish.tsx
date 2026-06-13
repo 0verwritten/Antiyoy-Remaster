@@ -47,6 +47,7 @@ export function SkirmishScreen({
       treePercentage: normalized.treePercentage,
       startingProvinces: normalized.startingProvinces,
       colorOffset: normalized.colorOffset,
+      fogOfWar: normalized.fogOfWar,
     });
   }
 
@@ -198,6 +199,17 @@ export function SkirmishScreen({
                   </div>
                 </div>
               )}
+
+              <div>
+                <label className={labelCls}>
+                  Fog of war{" "}
+                  <span className="font-normal opacity-60">(see only near your land)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Chip selected={setup.fogOfWar} onClick={() => update({ fogOfWar: true })}>On</Chip>
+                  <Chip selected={!setup.fogOfWar} onClick={() => update({ fogOfWar: false })}>Off</Chip>
+                </div>
+              </div>
 
               <div>
                 <label className={labelCls}>
