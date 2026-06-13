@@ -61,6 +61,8 @@ starting provinces per player by map size) and `"slay"` (all land divided).
 cd web && npx lakebed dev --port 3203        # local dev server
 npx tsx devtools/sim.ts                      # headless engine/AI invariants + pacing (both modes)
 npx tsx devtools/mapgen-tests.ts             # generator determinism/connectivity/density/balance
+npx tsx devtools/scenario-tests.ts           # scenario codec + loader + campaign levels
+npx tsx devtools/convert-campaign.ts         # regenerate __generated__/campaign-data.ts from core/
 node devtools/browser-check.mjs 3203         # real-browser smoke test (uses system Chrome via playwright-core)
 node devtools/check-bundle.mjs               # build + 900 KB client budget gate
 cd web && npx lakebed deploy                 # ship

@@ -29,10 +29,12 @@ import type {
   ActionResult,
   Fraction,
   GameConfig,
+  GameSession,
   GameState,
   HexTile,
   Province,
 } from "./types";
+import type { Scenario } from "./scenario";
 
 export interface ActionEvent {
   action: Action;
@@ -148,6 +150,119 @@ export function createGame(config: GameConfig): GameState {
   return state;
 }
 
+/**
+ * Build a game from a fully-specified Scenario (campaign level, editor,
+ * import…). Shares province/capital/income/turn finalization with
+ * createGame; the engine stays independent of campaign modules.
+ */
+export function createScenarioGame(scenario: Scenario, session?: GameSession): GameState {
+  // Grid bounds covering every placed hex, padded by 2 so neighbors and the
+  // surrounding water exist for rendering and tree spread.
+  let minQ = Infinity;
+  let maxQ = -Infinity;
+  let minR = Infinity;
+  let maxR = -Infinity;
+  for (const h of scenario.hexes) {
+    if (h.q < minQ) minQ = h.q;
+    if (h.q > maxQ) maxQ = h.q;
+    if (h.r < minR) minR = h.r;
+    if (h.r > maxR) maxR = h.r;
+  }
+  if (!Number.isFinite(minQ)) throw new Error("scenario has no hexes");
+  const pad = 2;
+  const hexes = buildGridForBounds(minQ - pad, maxQ + pad, minR - pad, maxR + pad);
+  const byCoord = new Map<string, HexTile>();
+  for (const hex of hexes) byCoord.set(hex.q + "," + hex.r, hex);
+
+  const config: GameConfig = {
+    mapSize: "medium", // scenarios carry their own grid; size is informational
+    playerCount: scenario.playerCount,
+    humanCount: scenario.humanCount,
+    seed: 1,
+    difficulty: scenario.difficulty,
+    mode: scenario.mode,
+    fogOfWar: scenario.fogOfWar,
+    diplomacy: scenario.diplomacy,
+  };
+
+  const state: GameState = {
+    config,
+    session: session ?? { source: "campaign", objective: scenario.objective },
+    hexes,
+    provinces: [],
+    turn: 0,
+    round: 0,
+    rngState: 1,
+    alive: new Array(scenario.playerCount).fill(true),
+    winner: null,
+    version: 0,
+    nextProvinceId: 1,
+  };
+
+  // Money carried per (capital) hex, applied after provinces are detected.
+  const moneyByCoord = new Map<string, number>();
+  for (const sh of scenario.hexes) {
+    const hex = byCoord.get(sh.q + "," + sh.r);
+    if (!hex) continue;
+    hex.active = true;
+    hex.fraction = sh.fraction;
+    hex.obj = sh.obj;
+    if (sh.unit && sh.unit > 0) {
+      hex.unit = { strength: sh.unit, readyToMove: sh.unitReady ?? false };
+    }
+    if (sh.money !== undefined) moneyByCoord.set(sh.q + "," + sh.r, sh.money);
+  }
+
+  rebuildAllProvinces(state, true);
+  // Override starting treasuries from the scenario (capital, else any hex).
+  for (const province of state.provinces) {
+    let money: number | undefined;
+    const cap = province.capital >= 0 ? state.hexes[province.capital] : null;
+    if (cap) money = moneyByCoord.get(cap.q + "," + cap.r);
+    if (money === undefined) {
+      for (const h of province.hexes) {
+        const hex = state.hexes[h];
+        const m = moneyByCoord.get(hex.q + "," + hex.r);
+        if (m !== undefined) {
+          money = m;
+          break;
+        }
+      }
+    }
+    if (money !== undefined) province.money = money;
+  }
+
+  beginTurn(state); // income for player 0, units refreshed
+  return state;
+}
+
+function buildGridForBounds(minQ: number, maxQ: number, minR: number, maxR: number): HexTile[] {
+  const hexes: HexTile[] = [];
+  for (let r = minR; r <= maxR; r++) {
+    for (let q = minQ; q <= maxQ; q++) {
+      hexes.push({
+        index: hexes.length,
+        q,
+        r,
+        active: false,
+        fraction: NEUTRAL_FRACTION,
+        obj: "none",
+        unit: null,
+        neighbors: [],
+      });
+    }
+  }
+  const byCoord = new Map<string, number>();
+  for (const hex of hexes) byCoord.set(hex.q + "," + hex.r, hex.index);
+  for (const hex of hexes) {
+    for (const [dq, dr] of AXIAL_DIRS) {
+      const idx = byCoord.get(hex.q + dq + "," + (hex.r + dr));
+      if (idx !== undefined) hex.neighbors.push(idx);
+    }
+  }
+  return hexes;
+}
+
 // ---------------------------------------------------------------- Provinces
 
 /** Recompute provinces from scratch. With init=true, gives starting money + capitals. */
@@ -221,6 +336,16 @@ function handleDetachedTile(state: GameState, hex: HexTile) {
 
 function ensureCapital(state: GameState, province: Province) {
   if (province.capital >= 0 && state.hexes[province.capital].obj === "town") return;
+  // Adopt a pre-placed town (scenarios/editor specify capitals explicitly);
+  // generated maps have no towns, so this branch is skipped there. Prefer a
+  // town without a unit on it.
+  const towns = province.hexes.filter((h) => state.hexes[h].obj === "town");
+  if (towns.length > 0) {
+    const preferred = towns.find((h) => !state.hexes[h].unit) ?? towns[0];
+    province.capital = preferred;
+    for (const h of towns) if (h !== preferred) state.hexes[h].obj = "none";
+    return;
+  }
   // Remove stray towns left from merges.
   province.capital = -1;
   // Prefer an empty hex away from the border.

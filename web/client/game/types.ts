@@ -84,8 +84,24 @@ export interface GameConfig {
   diplomacy?: boolean;
 }
 
+/** Win condition for a scenario/campaign level. */
+export type Objective =
+  | { type: "destroyEveryone" }
+  | { type: "destroyKingdom"; target: Fraction }
+  | { type: "ensureKingdomWins"; target: Fraction }
+  | { type: "diplomacy" };
+
+/** Where a game came from, plus its objective. Generated games omit objective. */
+export interface GameSession {
+  source: "generated" | "campaign";
+  campaignLevel?: number;
+  objective?: Objective;
+}
+
 export interface GameState {
   config: GameConfig;
+  /** Provenance + objective. Omitted on legacy/older saves (treated as generated). */
+  session?: GameSession;
   /** All tiles, including inactive water tiles. Index = HexTile.index. */
   hexes: HexTile[];
   provinces: Province[];
