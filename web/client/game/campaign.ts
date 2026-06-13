@@ -1,15 +1,17 @@
 // Campaign metadata and level construction. A campaign level is either a
-// fixed scenario (stored from the Java packs) or a procedurally generated map
-// with size/fractions/difficulty fixed by index and a deterministic seed —
-// mirroring the original's createLevelWithPredictableRandom (seed = index).
+// fixed scenario (raw string hosted on the CDN, metadata in-bundle) or a
+// procedurally generated map with size/fractions/difficulty fixed by index
+// and a deterministic seed — mirroring the original's
+// createLevelWithPredictableRandom (seed = index). Levels whose original
+// string can't be represented on the web fall back to a generated map.
 
 import { createGame, createScenarioGame } from "./engine";
-import { scenarioFromLevel, createCampaignGame, type CampaignLevelData } from "./scenario-loader";
-import { CAMPAIGN_LEVELS } from "./__generated__/campaign-data";
-import type { Difficulty, GameState, MapSize } from "./types";
+import { createCampaignGame } from "./scenario-loader";
+import { ensureCampaignData, getFixedLevelRaw, isCampaignDataLoaded } from "./campaign-data";
+import { CAMPAIGN_LEVEL_COUNT, FIXED_LEVEL_META } from "./__generated__/campaign-index";
+import type { GameState, MapSize } from "./types";
 
-/** MVP campaign size. Level 0 is the (deferred) scripted tutorial. */
-export const CAMPAIGN_LEVEL_COUNT = 24;
+export { CAMPAIGN_LEVEL_COUNT, ensureCampaignData };
 
 export type CampaignDifficulty = "easy" | "normal" | "hard";
 
@@ -19,8 +21,6 @@ export interface CampaignLevelInfo {
   /** "fixed" = hand-made scenario from the packs; "generated" = seeded map. */
   kind: "fixed" | "generated";
 }
-
-const fixedByLevel = new Map<number, CampaignLevelData>(CAMPAIGN_LEVELS.map((d) => [d.level, d]));
 
 // Original CampaignLevelFactory.getDifficultyByIndex.
 function difficultyByIndex(level: number): CampaignDifficulty {
@@ -47,10 +47,14 @@ function sizeByIndex(level: number): MapSize {
   return "large";
 }
 
+function isFixed(level: number): boolean {
+  return Object.prototype.hasOwnProperty.call(FIXED_LEVEL_META, level);
+}
+
 export function campaignLevels(): CampaignLevelInfo[] {
   const out: CampaignLevelInfo[] = [];
   for (let level = 1; level <= CAMPAIGN_LEVEL_COUNT; level++) {
-    const fixed = fixedByLevel.get(level);
+    const fixed = FIXED_LEVEL_META[level];
     out.push({
       level,
       kind: fixed ? "fixed" : "generated",
@@ -60,12 +64,12 @@ export function campaignLevels(): CampaignLevelInfo[] {
   return out;
 }
 
-/** Build the game for a campaign level (fixed scenario or seeded generation). */
-export function createCampaignLevelGame(level: number): GameState {
-  const fixed = fixedByLevel.get(level);
-  if (fixed) return createCampaignGame(fixed);
+/** True if the level needs the hosted data fetched before it can be built. */
+export function levelNeedsData(level: number): boolean {
+  return isFixed(level) && !isCampaignDataLoaded();
+}
 
-  // Generated level: deterministic per index, human is fraction 0.
+function buildGeneratedLevel(level: number): GameState {
   const state = createGame({
     mapSize: sizeByIndex(level),
     playerCount: fractionsByIndex(level),
@@ -78,11 +82,26 @@ export function createCampaignLevelGame(level: number): GameState {
   return state;
 }
 
-/** A scenario's intro messages, if any (fixed levels only). */
-export function campaignIntro(level: number): string[] | undefined {
-  const fixed = fixedByLevel.get(level);
-  if (!fixed) return undefined;
-  return scenarioFromLevel(fixed).intro;
+/**
+ * Build the game for a campaign level. For fixed levels the hosted data must
+ * already be loaded (call ensureCampaignData() first, e.g. on the campaign
+ * screen); if it isn't, falls back to a generated map so play never blocks.
+ */
+export function createCampaignLevelGame(level: number): GameState {
+  const meta = FIXED_LEVEL_META[level];
+  if (meta) {
+    const raw = getFixedLevelRaw(level);
+    if (raw) {
+      return createCampaignGame({
+        level,
+        name: meta.name,
+        raw,
+        difficulty: meta.difficulty,
+        playerCount: meta.playerCount,
+      });
+    }
+  }
+  return buildGeneratedLevel(level);
 }
 
 /** Result of the human player's campaign objective. */
@@ -98,7 +117,6 @@ export function evaluateCampaign(state: GameState): ObjectiveStatus {
     case "ensureKingdomWins":
       return state.winner === objective.target ? "won" : state.winner !== null ? "lost" : "ongoing";
     case "diplomacy":
-      // Diplomatic victory is evaluated once the diplomacy engine exists.
       return state.winner === 0 ? "won" : state.winner !== null ? "lost" : "ongoing";
     case "destroyEveryone":
     default:
@@ -106,5 +124,4 @@ export function evaluateCampaign(state: GameState): ObjectiveStatus {
   }
 }
 
-// Re-export so the editor/loader path stays available from one module later.
 export { createScenarioGame };

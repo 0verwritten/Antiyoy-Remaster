@@ -17,7 +17,7 @@ import { NEUTRAL_FRACTION } from "./constants";
 import type { Difficulty, GameMode, HexObj } from "./types";
 import type { Scenario, ScenarioHex } from "./scenario";
 
-const MAX_PLAYER_FRACTION = 5; // web palette has 6 colors (0..5)
+const MAX_PLAYER_FRACTION = 6; // web palette has 7 colors (0..6); neutral is 7
 
 const OBJ_BY_CODE: Record<number, HexObj> = {
   0: "none",

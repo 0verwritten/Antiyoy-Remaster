@@ -1,8 +1,8 @@
 // Campaign level selector: a grid of levels with lock/complete state, in the
 // original olive style. Locked levels can't be started.
 
-import { useState } from "preact/hooks";
-import { campaignLevels, CAMPAIGN_LEVEL_COUNT } from "../game/campaign";
+import { useEffect, useState } from "preact/hooks";
+import { campaignLevels, CAMPAIGN_LEVEL_COUNT, ensureCampaignData } from "../game/campaign";
 import {
   completedLevels,
   isLevelUnlocked,
@@ -25,6 +25,12 @@ export function CampaignScreen({
   onPlayLevel: (level: number) => void;
 }) {
   const [, bump] = useState(0);
+  // Prefetch the hosted level data so fixed levels load their exact map
+  // rather than the generated fallback.
+  const [dataError, setDataError] = useState(false);
+  useEffect(() => {
+    ensureCampaignData().catch(() => setDataError(true));
+  }, []);
   const done = new Set(completedLevels());
   const levels = campaignLevels();
   const completedCount = levels.filter((l) => done.has(l.level)).length;
@@ -42,6 +48,11 @@ export function CampaignScreen({
           <p className="mt-1 text-xs font-semibold text-[#2e2e28]/70">
             {completedCount} / {CAMPAIGN_LEVEL_COUNT} levels complete
           </p>
+          {dataError && (
+            <p className="mt-1 text-xs font-semibold text-[#a3322a]">
+              Level data unavailable — levels will use generated maps.
+            </p>
+          )}
         </header>
 
         <section className="rounded-3xl bg-[#b3ae7e] p-4 shadow-[0_4px_0_rgba(0,0,0,0.2)]">

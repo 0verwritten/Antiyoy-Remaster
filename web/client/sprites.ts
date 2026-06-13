@@ -40,6 +40,7 @@ export const ORIGINAL_FRACTION_COLORS = [
   "#5cb5b0", // cyan (hex_cyan)
   "#b5bc64", // yellow (hex_yellow)
   "#b55dad", // magenta (hex_color5)
+  "#cd782e", // orange (hex_color6) — 7th player, campaign only
 ];
 export const ORIGINAL_NEUTRAL_COLOR = "#666666"; // hex_color3
 export const WATER_COLOR = "#2a628f"; // game_background_water.png

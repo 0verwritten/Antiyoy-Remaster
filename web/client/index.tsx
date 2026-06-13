@@ -17,7 +17,7 @@ import { AboutScreen } from "./screens/about";
 import { LoadScreen } from "./screens/load";
 import { ReplaysScreen } from "./screens/replays";
 import { GameScreen } from "./screens/game";
-import { createCampaignLevelGame } from "./game/campaign";
+import { createCampaignLevelGame, ensureCampaignData, levelNeedsData } from "./game/campaign";
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
 // game lives at antiyoy.lakebed.app only.
@@ -77,13 +77,22 @@ export function App() {
 
   const startCampaignLevel = useCallback(
     (level: number) => {
-      const state = createCampaignLevelGame(level);
-      configRef.current = state.config;
-      stateRef.current = state;
-      loadedReplayRef.current = null;
-      gameIdRef.current++;
-      setScreen({ kind: "game" });
-      forceRender();
+      const launch = () => {
+        const state = createCampaignLevelGame(level);
+        configRef.current = state.config;
+        stateRef.current = state;
+        loadedReplayRef.current = null;
+        gameIdRef.current++;
+        setScreen({ kind: "game" });
+        forceRender();
+      };
+      // Fixed levels need the hosted data; wait for it (then build the exact
+      // map), but never block forever — fall back to a generated map on error.
+      if (levelNeedsData(level)) {
+        ensureCampaignData().then(launch, launch);
+      } else {
+        launch();
+      }
     },
     [forceRender]
   );

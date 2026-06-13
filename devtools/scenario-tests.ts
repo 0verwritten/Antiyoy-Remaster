@@ -3,12 +3,28 @@
 // province money, capitals and starting turn. Also smoke-loads every
 // converted campaign level. Run from repo root: npx tsx devtools/scenario-tests.ts
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createScenarioGame, getProvinceByHex } from "../web/client/game/engine";
 import { parseLevelString } from "../web/client/game/scenario-codec";
-import { scenarioFromLevel, createCampaignGame } from "../web/client/game/scenario-loader";
-import { CAMPAIGN_LEVELS } from "../web/client/game/__generated__/campaign-data";
+import { scenarioFromLevel, createCampaignGame, type CampaignLevelData } from "../web/client/game/scenario-loader";
+import { FIXED_LEVEL_META } from "../web/client/game/__generated__/campaign-index";
 import { NEUTRAL_FRACTION } from "../web/client/game/constants";
 import type { GameState } from "../web/client/game/types";
+
+// Hosted level strings live on disk (CDN at runtime); load them for tests.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const rawByLevel: Record<number, string> = JSON.parse(
+  readFileSync(join(repoRoot, "assets/web/campaign-levels.json"), "utf8")
+);
+const CAMPAIGN_LEVELS: CampaignLevelData[] = Object.entries(FIXED_LEVEL_META).map(([lvl, meta]) => ({
+  level: Number(lvl),
+  name: meta.name,
+  difficulty: meta.difficulty,
+  playerCount: meta.playerCount,
+  raw: rawByLevel[Number(lvl)],
+}));
 
 let checks = 0;
 function assert(cond: boolean, message: string) {

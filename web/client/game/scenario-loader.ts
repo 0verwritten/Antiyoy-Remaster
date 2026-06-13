@@ -8,7 +8,8 @@ import { parseLevelString } from "./scenario-codec";
 import type { Scenario } from "./scenario";
 import type { GameState, Objective } from "./types";
 
-/** A campaign level as stored in __generated__/campaign-data.ts. */
+/** A campaign level: metadata from __generated__/campaign-index.ts plus its
+ * raw string (hosted, fetched via campaign-data.ts). */
 export interface CampaignLevelData {
   /** 1-based campaign index. */
   level: number;
