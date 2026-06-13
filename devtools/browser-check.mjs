@@ -16,9 +16,11 @@ page.on("console", (m) => {
 });
 
 await page.goto(base + "/", { waitUntil: "networkidle", timeout: 45000 });
-// Main menu -> skirmish setup -> start the game.
+// Main menu -> Play submenu -> Skirmish setup -> start the game.
 await page.getByRole("button", { name: /^play$/i }).click();
-await page.waitForTimeout(300);
+await page.waitForTimeout(200);
+await page.getByRole("button", { name: /^skirmish$/i }).click();
+await page.waitForTimeout(200);
 await page.getByRole("button", { name: /^play$/i }).click();
 await page.waitForTimeout(1800);
 await page.screenshot({ path: "/tmp/antiyoy-check-game.png" });
