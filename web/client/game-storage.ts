@@ -34,6 +34,7 @@ export interface ReplayRecord {
   initial: GameState;
   steps: ReplayStep[];
   winner: number | null;
+  endReason?: GameState["endReason"];
   rounds: number;
 }
 

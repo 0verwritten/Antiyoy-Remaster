@@ -21,6 +21,8 @@ export interface Settings {
   showResumeButton: boolean;
   /** After a unit moves, automatically select the next useful ready unit. */
   autoTransition: boolean;
+  /** Show elapsed time for the current turn and duration of the previous turn. */
+  showTurnTimer: boolean;
 }
 
 const KEY = "antiyoy.settings";
@@ -40,6 +42,7 @@ const DEFAULTS: Settings = {
   leftHanded: false,
   showResumeButton: true,
   autoTransition: false,
+  showTurnTimer: false,
 };
 
 /** Upgrades any previously stored payload to the current shape. */

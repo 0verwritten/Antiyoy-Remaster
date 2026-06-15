@@ -3,7 +3,7 @@
 // client/screens/.
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { createGame } from "./game/engine";
+import { createGame, isGameOver } from "./game/engine";
 import type { GameConfig, GameState, ReplayStep } from "./game/types";
 import { settings } from "./settings";
 import { latestSave, type SaveRecord } from "./game-storage";
@@ -130,7 +130,7 @@ export function App() {
 
   const resumeGame = useCallback(() => {
     const st = stateRef.current;
-    if (st && st.winner === null) {
+    if (st && !isGameOver(st)) {
       enterGameScreen(st);
       return;
     }
@@ -145,7 +145,7 @@ export function App() {
         <MainMenuScreen
           canResume={
             settings.showResumeButton &&
-            ((stateRef.current !== null && stateRef.current.winner === null) || hasSavedGame)
+            ((stateRef.current !== null && !isGameOver(stateRef.current)) || hasSavedGame)
           }
           onPlay={() => setScreen({ kind: "chooseMode" })}
           onResume={resumeGame}

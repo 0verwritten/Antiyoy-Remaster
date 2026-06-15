@@ -165,6 +165,8 @@ export function createGame(config: GameConfig): GameState {
     rngState: config.seed | 0 || 1,
     alive: new Array(config.playerCount).fill(true),
     winner: null,
+    turnStartedAt: Date.now(),
+    turnHistory: [],
     version: 0,
     nextProvinceId: 1,
   };
@@ -221,6 +223,8 @@ export function createScenarioGame(scenario: Scenario, session?: GameSession): G
     rngState: 1,
     alive: new Array(scenario.playerCount).fill(true),
     winner: null,
+    turnStartedAt: Date.now(),
+    turnHistory: [],
     version: 0,
     nextProvinceId: 1,
   };
@@ -583,46 +587,54 @@ export function getBuildZone(
 // ---------------------------------------------------------------- Actions
 
 export function applyAction(state: GameState, action: Action): ActionResult {
-  if (state.winner !== null) return { ok: false, reason: "game over" };
-  const actor = state.turn;
+  if (isGameOver(state)) return { ok: false, reason: "game over" };
+  ensureTurnTracking(state);
+  const actor = action.type === "resign" ? action.fraction : state.turn;
   const moneyBefore = playerMoney(state);
+  const timedAction = withActionTime(action);
   let result: ActionResult;
-  switch (action.type) {
+  switch (timedAction.type) {
     case "moveUnit":
-      result = doMoveUnit(state, action.from, action.to);
+      result = doMoveUnit(state, timedAction.from, timedAction.to);
       break;
     case "buyUnit":
-      result = doBuyUnit(state, action.provinceId, action.strength, action.target);
+      result = doBuyUnit(state, timedAction.provinceId, timedAction.strength, timedAction.target);
       break;
     case "build":
-      result = doBuild(state, action.provinceId, action.kind, action.target);
+      result = doBuild(state, timedAction.provinceId, timedAction.kind, timedAction.target);
       break;
     case "endTurn":
-      result = doEndTurn(state);
+      result = doEndTurn(state, timedAction.endedAt!);
+      break;
+    case "draw":
+      result = doDraw(state, timedAction.endedAt!);
+      break;
+    case "resign":
+      result = doResign(state, timedAction.fraction, timedAction.endedAt!);
       break;
     case "declareWar":
-      result = declareWar(state, actor, action.target)
+      result = declareWar(state, actor, timedAction.target)
         ? { ok: true }
         : { ok: false, reason: "cannot declare war" };
       break;
     case "setBlackMark":
-      result = setBlackMark(state, actor, action.target)
+      result = setBlackMark(state, actor, timedAction.target)
         ? { ok: true }
         : { ok: false, reason: "cannot black mark" };
       break;
     case "proposeExchange":
       result =
-        proposeExchange(state, actor, action.to, action.kind, action.amount) >= 0
+        proposeExchange(state, actor, timedAction.to, timedAction.kind, timedAction.amount) >= 0
           ? { ok: true }
           : { ok: false, reason: "cannot propose" };
       break;
     case "acceptExchange":
-      result = acceptExchange(state, action.proposalId)
+      result = acceptExchange(state, timedAction.proposalId)
         ? { ok: true }
         : { ok: false, reason: "no such proposal" };
       break;
     case "rejectExchange":
-      result = rejectExchange(state, action.proposalId)
+      result = rejectExchange(state, timedAction.proposalId)
         ? { ok: true }
         : { ok: false, reason: "no such proposal" };
       break;
@@ -630,7 +642,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   if (result.ok) {
     state.version++;
     actionObservers.get(state)?.({
-      action: structuredClone(action),
+      action: structuredClone(timedAction),
       actor,
       moneyBefore,
       moneyAfter: playerMoney(state),
@@ -742,7 +754,13 @@ function doBuild(
 
 // ---------------------------------------------------------------- Turn flow
 
-function doEndTurn(state: GameState): ActionResult {
+function doEndTurn(state: GameState, endedAt: number): ActionResult {
+  recordTurnTiming(state, endedAt, "endTurn");
+  advanceTurn(state, endedAt);
+  return { ok: true };
+}
+
+function advanceTurn(state: GameState, startedAt: number) {
   // Find next alive fraction.
   let next = state.turn;
   for (let i = 0; i < state.config.playerCount; i++) {
@@ -756,7 +774,62 @@ function doEndTurn(state: GameState): ActionResult {
   }
   state.turn = next;
   beginTurn(state);
+  state.turnStartedAt = startedAt;
+}
+
+function doDraw(state: GameState, endedAt: number): ActionResult {
+  recordTurnTiming(state, endedAt, "draw");
+  state.endReason = "draw";
   return { ok: true };
+}
+
+function doResign(state: GameState, fraction: number, endedAt: number): ActionResult {
+  if (!Number.isInteger(fraction) || fraction < 0 || fraction >= state.config.playerCount) {
+    return { ok: false, reason: "invalid player" };
+  }
+  if (!state.alive[fraction]) return { ok: false, reason: "player already defeated" };
+
+  const resignedOnTurn = fraction === state.turn;
+  if (resignedOnTurn) recordTurnTiming(state, endedAt, "resignation");
+  state.resigned = [...(state.resigned ?? []), fraction];
+  state.alive[fraction] = false;
+  onFractionEliminated(state, fraction);
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction) continue;
+    hex.fraction = NEUTRAL_FRACTION;
+    hex.unit = null;
+    if (hex.obj === "town") hex.obj = "none";
+  }
+  rebuildAllProvinces(state, false);
+  checkElimination(state);
+  if (state.winner !== null) {
+    state.endReason = "resignation";
+  } else if (resignedOnTurn) {
+    advanceTurn(state, endedAt);
+  }
+  return { ok: true };
+}
+
+function ensureTurnTracking(state: GameState) {
+  if (!Array.isArray(state.turnHistory)) state.turnHistory = [];
+  if (typeof state.turnStartedAt !== "number") state.turnStartedAt = Date.now();
+}
+
+function withActionTime(action: Action): Action {
+  if (action.type !== "endTurn" && action.type !== "draw" && action.type !== "resign") return action;
+  return action.endedAt === undefined ? { ...action, endedAt: Date.now() } : action;
+}
+
+function recordTurnTiming(state: GameState, endedAt: number, endedBy: "endTurn" | "draw" | "resignation") {
+  const startedAt = state.turnStartedAt!;
+  state.turnHistory!.push({
+    fraction: state.turn,
+    round: state.round,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, endedAt - startedAt),
+    endedBy,
+  });
 }
 
 function beginTurn(state: GameState) {
@@ -833,6 +906,10 @@ function checkElimination(state: GameState) {
 
 export function isHumanTurn(state: GameState): boolean {
   return state.turn < state.config.humanCount;
+}
+
+export function isGameOver(state: GameState): boolean {
+  return state.winner !== null || state.endReason === "draw";
 }
 
 /** Price of a unit of the given strength. */

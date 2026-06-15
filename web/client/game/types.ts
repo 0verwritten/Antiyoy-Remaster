@@ -163,10 +163,27 @@ export interface GameState {
   alive: boolean[];
   /** Winner fraction, or null while the game is running. */
   winner: Fraction | null;
+  /** Non-victory ending, or why the final winner was decided early. */
+  endReason?: "draw" | "resignation";
+  /** Fractions that voluntarily left the match. */
+  resigned?: Fraction[];
+  /** Wall-clock timestamp for the beginning of the current turn. */
+  turnStartedAt?: number;
+  /** Completed and interrupted turns, retained across saves and online sync. */
+  turnHistory?: TurnTiming[];
   /** Monotonic counter bumped on every applied action (for UI memoization). */
   version: number;
   /** Deterministic allocator for province identities, including replay reconstruction. */
   nextProvinceId: number;
+}
+
+export interface TurnTiming {
+  fraction: Fraction;
+  round: number;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  endedBy: "endTurn" | "draw" | "resignation";
 }
 
 /** Actions a player (human or AI) can take. All validated by the engine. */
@@ -185,7 +202,9 @@ export type Action =
       provinceId: number;
       target: number;
     }
-  | { type: "endTurn" }
+  | { type: "endTurn"; endedAt?: number }
+  | { type: "draw"; endedAt?: number }
+  | { type: "resign"; fraction: Fraction; endedAt?: number }
   // --- diplomacy (only valid when config.diplomacy is on); actor = current turn ---
   | { type: "declareWar"; target: Fraction }
   | { type: "setBlackMark"; target: Fraction }

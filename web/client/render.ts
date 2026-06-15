@@ -79,18 +79,23 @@ function fractionColor(fraction: number): string {
   );
 }
 
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
+function colorToRgb(color: string): [number, number, number] {
+  if (color.startsWith("#")) {
+    const h = color.slice(1);
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+  const match = color.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+  if (!match) throw new Error(`Unsupported color format: ${color}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
 function shade(color: string, amount: number): string {
   // amount > 0 lightens, < 0 darkens.
-  const [r, g, b] = hexToRgb(color);
+  const [r, g, b] = colorToRgb(color);
   const f = (c: number) =>
     Math.round(amount >= 0 ? c + (255 - c) * amount : c * (1 + amount));
   return `rgb(${f(r)},${f(g)},${f(b)})`;

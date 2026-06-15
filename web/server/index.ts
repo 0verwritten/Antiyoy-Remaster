@@ -9,7 +9,13 @@ import type {
 } from "../shared/online";
 
 type Row = Record<string, unknown> & { id: string; createdAt: string; updatedAt: string };
-type StateHeader = { turn?: number; version?: number; winner?: number | null };
+type StateHeader = {
+  turn?: number;
+  version?: number;
+  winner?: number | null;
+  endReason?: "draw" | "resignation";
+  resigned?: number[];
+};
 
 const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#f0eee3"/>
@@ -233,12 +239,51 @@ export default capsule({
         if (typeof previous.version !== "number" || next.version !== previous.version + 1) {
           throw new Error("Invalid state version");
         }
+        if (next.endReason !== previous.endReason || JSON.stringify(next.resigned ?? []) !== JSON.stringify(previous.resigned ?? [])) {
+          throw new Error("Use the game exit action");
+        }
         ctx.db.lobbies.update(lobby.id, {
           stateJson0,
           stateJson1,
           stateJson2,
           stateVersion: String(previousVersion + 1),
-          status: next.winner == null ? "playing" : "finished",
+          status: next.winner == null && next.endReason !== "draw" ? "playing" : "finished",
+        });
+      }
+    ),
+
+    publishOnlineExit: mutation(
+      (ctx, lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => {
+        requireAccount(ctx);
+        const row = ctx.db.lobbies.get(lobbyId) as Row | null;
+        if (!row) throw new Error("Lobby not found");
+        const lobby = lobbyFromRow(row);
+        if (lobby.status !== "playing") throw new Error("Game is not running");
+        const player = lobby.players.find((item) => item.userId === ctx.auth.userId);
+        if (!player) throw new Error("Not a player in this game");
+        if (lobby.stateVersion !== previousVersion) throw new Error("State is out of date");
+        const previous = parseJson<StateHeader>(lobby.stateJson, {});
+        const nextJson = stateJson0 + stateJson1 + stateJson2;
+        const next = parseJson<StateHeader>(nextJson, {});
+        if (typeof previous.version !== "number" || next.version !== previous.version + 1) {
+          throw new Error("Invalid state version");
+        }
+        if (kind === "draw") {
+          if (next.endReason !== "draw" || next.winner != null) throw new Error("Invalid draw state");
+        } else {
+          const before = previous.resigned ?? [];
+          const after = next.resigned ?? [];
+          if (before.includes(player.seat) || !after.includes(player.seat) || after.length !== before.length + 1) {
+            throw new Error("You can only resign yourself");
+          }
+        }
+        const finished = next.winner != null || next.endReason === "draw";
+        ctx.db.lobbies.update(lobby.id, {
+          stateJson0,
+          stateJson1,
+          stateJson2,
+          stateVersion: String(previousVersion + 1),
+          status: finished ? "finished" : "playing",
         });
       }
     ),

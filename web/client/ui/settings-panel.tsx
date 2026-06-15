@@ -101,6 +101,7 @@ export function SettingsPanel() {
         value={settings.autoTransition}
         onChange={(v) => setSetting("autoTransition", v)}
       />
+      <Toggle label="Show turn timer" value={settings.showTurnTimer} onChange={(v) => setSetting("showTurnTimer", v)} />
       <Toggle label="Left-handed layout" value={settings.leftHanded} onChange={(v) => setSetting("leftHanded", v)} />
       <Toggle
         label="Resume button on main menu"

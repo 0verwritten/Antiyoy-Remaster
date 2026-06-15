@@ -23,6 +23,10 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
     [lobbyId: string, actor: number, previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string],
     void
   >("publishOnlineState");
+  const publishExit = useMutation<
+    [lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string],
+    void
+  >("publishOnlineExit");
   const sendChat = useMutation<[body: string], void>("sendChat");
   const [error, setError] = useState("");
   const [setup, setSetup] = useState<OnlineLobbyConfig>({
@@ -75,6 +79,7 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
         snapshot={snapshot}
         userId={auth.userId}
         publishState={publishState}
+        publishExit={publishExit}
         sendChat={sendChat}
         onMenu={() => {
           if (lobby.status === "finished") void run(async () => {
@@ -179,10 +184,11 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function OnlineGame({ snapshot, userId, publishState, sendChat, onMenu }: {
+function OnlineGame({ snapshot, userId, publishState, publishExit, sendChat, onMenu }: {
   snapshot: OnlineSnapshot;
   userId: string;
   publishState: (lobbyId: string, actor: number, previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
+  publishExit: (lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
   sendChat: (body: string) => Promise<void>;
   onMenu: () => void;
 }) {
@@ -222,6 +228,21 @@ function OnlineGame({ snapshot, userId, publishState, sendChat, onMenu }: {
       });
   }, [lobby.id, publishState]);
 
+  const onExit = useCallback((kind: "draw" | "resign", state: GameState) => {
+    const chunks = splitState(state);
+    const previousVersion = serverVersionRef.current + pendingRef.current;
+    pendingRef.current++;
+    queueRef.current = queueRef.current
+      .then(() => publishExit(lobby.id, kind, previousVersion, chunks[0], chunks[1], chunks[2]))
+      .then(() => {
+        serverVersionRef.current++;
+        pendingRef.current--;
+      })
+      .catch(() => {
+        pendingRef.current = 0;
+      });
+  }, [lobby.id, publishExit]);
+
   return (
     <GameScreen
       screen={screen}
@@ -240,6 +261,7 @@ function OnlineGame({ snapshot, userId, publishState, sendChat, onMenu }: {
         messages: snapshot.messages,
         sendChat,
         onAction,
+        onExit,
         stateRevision: onlineStateRevisionRef.current,
       }}
     />

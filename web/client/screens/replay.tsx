@@ -176,8 +176,10 @@ export function ReplayViewer({
           </button>
         </div>
         <div className="mt-2 text-center text-[11px] font-semibold opacity-60">
-          {replayState.winner === null
-            ? `Round ${replayState.round + 1}, Player ${replayState.turn + 1}'s turn`
+          {replayState.endReason === "draw"
+            ? "Game ended in a draw"
+            : replayState.winner === null
+              ? `Round ${replayState.round + 1}, Player ${replayState.turn + 1}'s turn`
             : `Player ${replayState.winner + 1} won`}
         </div>
       </div>
@@ -187,6 +189,8 @@ export function ReplayViewer({
 
 function replayActionLabel(action: Action): string {
   if (action.type === "endTurn") return "ended turn";
+  if (action.type === "draw") return "declared a draw";
+  if (action.type === "resign") return `resigned Player ${action.fraction + 1}`;
   if (action.type === "moveUnit") return "moved a warrior";
   if (action.type === "buyUnit") return `bought warrior ${action.strength}`;
   return `built ${action.kind === "strongTower" ? "strong tower" : action.kind}`;

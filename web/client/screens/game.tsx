@@ -15,6 +15,7 @@ import {
   getProvinceProfit,
   getUnitPrice,
   isHumanTurn,
+  isGameOver,
   marchUnitsToHex,
   setActionObserver,
   type ActionEvent,
@@ -68,6 +69,7 @@ export interface GameScreenProps {
     messages: OnlineChatMessage[];
     sendChat: (body: string) => Promise<void>;
     onAction: (actor: number, state: GameState) => void;
+    onExit: (kind: "draw" | "resign", state: GameState) => void;
     stateRevision: number;
   };
 }
@@ -104,6 +106,7 @@ export function GameScreen(props: GameScreenProps) {
   const [paused, setPaused] = useState<"none" | "menu" | "settings">("none");
   const [justSaved, setJustSaved] = useState(false);
   const [showOnlineChat, setShowOnlineChat] = useState(false);
+  const [timerNow, setTimerNow] = useState(Date.now());
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -114,12 +117,22 @@ export function GameScreen(props: GameScreenProps) {
       actor: event.actor,
       moneyDelta: event.moneyAfter.map((money, fraction) => money - event.moneyBefore[fraction]),
     });
-    props.online?.onAction(event.actor, stateRef.current!);
+    if (event.action.type === "draw" || event.action.type === "resign") {
+      props.online?.onExit(event.action.type === "draw" ? "draw" : "resign", stateRef.current!);
+    } else {
+      props.online?.onAction(event.actor, stateRef.current!);
+    }
   }, [props.online, stateRef]);
 
   const canControlTurn = useCallback((st: GameState) => {
     return props.online ? st.turn === props.online.seat : isHumanTurn(st);
   }, [props.online]);
+
+  useEffect(() => {
+    if (!settings.showTurnTimer || isGameOver(state)) return;
+    const timer = window.setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [state, state.turn, state.turnStartedAt, state.winner, state.endReason, settings.showTurnTimer]);
 
   useEffect(() => {
     const live = stateRef.current;
@@ -219,7 +232,7 @@ export function GameScreen(props: GameScreenProps) {
 
   const doUndo = useCallback(() => {
     const st = stateRef.current;
-    if (!st || props.online || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+    if (!st || props.online || aiThinkingRef.current || isGameOver(st) || !isHumanTurn(st)) return;
     const entry = undoRef.current.pop();
     if (!entry) return;
     setActionObserver(st, null);
@@ -263,7 +276,7 @@ export function GameScreen(props: GameScreenProps) {
   const runAiIfNeeded = useCallback(() => {
     const st = stateRef.current;
     if (!st) return;
-    if (st.winner !== null) {
+    if (isGameOver(st)) {
       forceRender();
       refreshUi();
       return;
@@ -291,9 +304,9 @@ export function GameScreen(props: GameScreenProps) {
       // Campaign defeat: the human is gone, so stop rather than watching the
       // AIs play out the rest.
       const campaignDefeat = s.session?.source === "campaign" && !s.alive[0];
-      if (s.winner !== null || isHumanTurn(s) || campaignDefeat) {
+      if (isGameOver(s) || isHumanTurn(s) || campaignDefeat) {
         aiThinkingRef.current = false;
-        if (!props.online && s.winner === null && !campaignDefeat && s.config.humanCount >= 2 && isHumanTurn(s)) {
+        if (!props.online && !isGameOver(s) && !campaignDefeat && s.config.humanCount >= 2 && isHumanTurn(s)) {
           setScreen({ kind: "pass", fraction: s.turn });
         }
         forceRender();
@@ -311,7 +324,7 @@ export function GameScreen(props: GameScreenProps) {
   // Spectator games (humanCount 0) and AI-first setups need the chain to
   // start on its own; re-arm whenever a new game begins.
   useEffect(() => {
-    if (state && state.winner === null && !isHumanTurn(state)) runAiIfNeeded();
+    if (state && !isGameOver(state) && !isHumanTurn(state)) runAiIfNeeded();
   }, [state, runAiIfNeeded]);
 
   /** Snapshot of the running game as a persistable save record. */
@@ -338,14 +351,14 @@ export function GameScreen(props: GameScreenProps) {
 
   const doEndTurn = useCallback(() => {
     const st = stateRef.current;
-    if (!st || aiThinkingRef.current || st.winner !== null) return;
+    if (!st || aiThinkingRef.current || isGameOver(st)) return;
     if (!canControlTurn(st)) return;
     if (settings.confirmEndTurn && !confirm("End turn?")) return;
     clearSelection();
     undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
     // End-of-human-turn autosave (turns are final, so this never races undo).
-    if (!props.online && st.config.humanCount > 0 && st.winner === null) {
+    if (!props.online && st.config.humanCount > 0 && !isGameOver(st)) {
       const record = buildSaveRecord(AUTOSAVE_ID, "Autosave");
       if (record) void putSave(record).catch(() => {});
     }
@@ -353,11 +366,30 @@ export function GameScreen(props: GameScreenProps) {
     runAiIfNeeded();
   }, [stateRef, clearSelection, forceRender, runAiIfNeeded, buildSaveRecord, canControlTurn, props.online]);
 
+  const finishEarly = useCallback((kind: "draw" | "resign", fraction?: number) => {
+    const st = stateRef.current;
+    if (!st || isGameOver(st)) return;
+    const action = kind === "draw"
+      ? ({ type: "draw", endedAt: Date.now() } as const)
+      : ({ type: "resign", fraction: fraction ?? st.turn, endedAt: Date.now() } as const);
+    const result = applyAction(st, action);
+    if (!result.ok) {
+      alert(result.reason ?? "Could not end the game");
+      return;
+    }
+    undoRef.current = [];
+    clearSelection();
+    setPaused("none");
+    forceRender();
+    refreshUi();
+    if (!props.online) runAiIfNeeded();
+  }, [stateRef, clearSelection, forceRender, refreshUi, runAiIfNeeded, props.online]);
+
   // Persist a replay record once when the game ends.
   useEffect(() => {
     const st = stateRef.current;
     const cfg = props.configRef.current;
-    if (!st || !cfg || st.winner === null || replayPersistedRef.current) return;
+    if (!st || !cfg || !isGameOver(st) || replayPersistedRef.current) return;
     replayPersistedRef.current = true;
     const mode = (cfg.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
     void putReplay({
@@ -369,9 +401,10 @@ export function GameScreen(props: GameScreenProps) {
       initial: structuredClone(replayInitialRef.current),
       steps: structuredClone(replayStepsRef.current),
       winner: st.winner,
+      endReason: st.endReason,
       rounds: st.round,
     }).catch(() => {});
-  }, [state.winner, stateRef, props.configRef]);
+  }, [state.winner, state.endReason, stateRef, props.configRef]);
 
   // ---- pointer interaction (pan/zoom/tap/long-press march) ----
   usePointerControls(
@@ -390,7 +423,7 @@ export function GameScreen(props: GameScreenProps) {
   function onLongPress(screenPt: Point) {
     if (!settings.holdToMarch) return;
     const st = stateRef.current;
-    if (!st || aiThinkingRef.current || st.winner !== null || !canControlTurn(st)) return;
+    if (!st || aiThinkingRef.current || isGameOver(st) || !canControlTurn(st)) return;
     const world = screenToWorld(camRef.current, screenPt);
     const idx = pixelToHex(st, world, HEX_SIZE);
     if (idx < 0) return;
@@ -407,7 +440,7 @@ export function GameScreen(props: GameScreenProps) {
 
   function onTap(screenPt: Point) {
     const st = stateRef.current;
-    if (!st || aiThinkingRef.current || st.winner !== null) return;
+    if (!st || aiThinkingRef.current || isGameOver(st)) return;
     if (!canControlTurn(st)) return;
     const world = screenToWorld(camRef.current, screenPt);
     const idx = pixelToHex(st, world, HEX_SIZE);
@@ -559,7 +592,7 @@ export function GameScreen(props: GameScreenProps) {
         fitCamera();
         return;
       }
-      if (aiThinkingRef.current || st.winner !== null || !canControlTurn(st)) return;
+      if (aiThinkingRef.current || isGameOver(st) || !canControlTurn(st)) return;
       if (e.key === "Escape") {
         clearSelection();
       } else if (e.key === "e" || e.key === "E" || e.key === "Enter") {
@@ -613,7 +646,7 @@ export function GameScreen(props: GameScreenProps) {
     }
   }, [campaignLevel, campaignStatus]);
 
-  const human = canControlTurn(state) && !aiThinkingRef.current && state.winner === null;
+  const human = canControlTurn(state) && !aiThinkingRef.current && !isGameOver(state);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#2a628f] text-slate-100 select-none">
@@ -624,7 +657,7 @@ export function GameScreen(props: GameScreenProps) {
       />
 
       {/* Top bar */}
-      <TopBar state={state} onMenu={() => setPaused("menu")} playerNames={props.online?.players} />
+      <TopBar state={state} onMenu={() => setPaused("menu")} playerNames={props.online?.players} timerNow={timerNow} />
 
       {props.online && (
         <button
@@ -650,7 +683,7 @@ export function GameScreen(props: GameScreenProps) {
       )}
 
       {/* Defeated notice */}
-      {state.winner === null && defeatedHumans(state).length > 0 && (
+      {!isGameOver(state) && defeatedHumans(state).length > 0 && (
         <DefeatedBadge state={state} />
       )}
 
@@ -724,7 +757,7 @@ export function GameScreen(props: GameScreenProps) {
       )}
 
       {/* Pause menu: the game stays mounted underneath */}
-      {paused !== "none" && state.winner === null && (
+      {paused !== "none" && !isGameOver(state) && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           {paused === "menu" ? (
             <div className="flex w-full max-w-xs flex-col gap-3 rounded-3xl bg-[#b3ae7e] p-6 shadow-[0_4px_0_rgba(0,0,0,0.25)]">
@@ -761,6 +794,34 @@ export function GameScreen(props: GameScreenProps) {
                 Restart
               </MenuButton>}
               <MenuButton onClick={() => setPaused("settings")}>Settings</MenuButton>
+              <MenuButton onClick={() => {
+                if (confirm("End this game as a draw?")) finishEarly("draw");
+              }}>Draw game</MenuButton>
+              {props.online ? (
+                <MenuButton onClick={() => {
+                  if (confirm("Resign from this game?")) finishEarly("resign", props.online!.seat);
+                }}>Resign</MenuButton>
+              ) : (
+                <label className="flex flex-col gap-2 text-sm font-bold text-[#2e2e28]">
+                  Resign player
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      const fraction = Number(event.currentTarget.value);
+                      event.currentTarget.value = "";
+                      if (Number.isInteger(fraction) && confirm(`${fractionLabel(state, fraction)} resigns?`)) {
+                        finishEarly("resign", fraction);
+                      }
+                    }}
+                    className="min-h-[48px] rounded-xl bg-[#f0eee3] px-3 font-bold"
+                  >
+                    <option value="">Choose player...</option>
+                    {state.alive.map((alive, fraction) => alive && (
+                      <option key={fraction} value={fraction}>{fractionLabel(state, fraction)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <MenuButton onClick={props.onMenu}>Main menu</MenuButton>
             </div>
           ) : (
@@ -787,10 +848,11 @@ export function GameScreen(props: GameScreenProps) {
       )}
 
       {/* Skirmish victory overlay */}
-      {campaignLevel == null && state.winner !== null && (
+      {campaignLevel == null && isGameOver(state) && (
         <VictoryOverlay
-          label={fractionLabel(state, state.winner)}
-          color={displayFractionColor(state.config, state.winner)}
+          label={state.winner === null ? "" : fractionLabel(state, state.winner)}
+          color={state.winner === null ? "transparent" : displayFractionColor(state.config, state.winner)}
+          draw={state.endReason === "draw"}
           onReplay={() => setShowReplay(true)}
           onPlayAgain={props.onPlayAgain}
           onMenu={props.onMenu}
@@ -821,10 +883,12 @@ function TopBar({
   state,
   onMenu,
   playerNames,
+  timerNow,
 }: {
   state: GameState;
   onMenu: () => void;
   playerNames?: string[];
+  timerNow: number;
 }) {
   const f = state.turn;
   const color = displayFractionColor(state.config, f);
@@ -837,6 +901,10 @@ function TopBar({
         />
         <span className="text-sm font-bold">{playerNames?.[f] ?? fractionLabel(state, f)}</span>
         <span className="text-xs opacity-60">Round {state.round + 1}</span>
+        {settings.showTurnTimer && <span className="text-xs font-bold opacity-70">
+          Turn {formatDuration(Math.max(0, timerNow - (state.turnStartedAt ?? timerNow)))}
+          {state.turnHistory?.length ? ` · Last ${formatDuration(state.turnHistory[state.turnHistory.length - 1].durationMs)}` : ""}
+        </span>}
       </div>
       <button
         type="button"
@@ -1003,6 +1071,13 @@ function defeatedHumans(state: GameState): number[] {
     if (!state.alive[f]) out.push(f);
   }
   return out;
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function currentSelectedProvince(state: GameState, id: number): Province | null {

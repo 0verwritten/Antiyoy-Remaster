@@ -19,7 +19,7 @@ import { ReplayViewer } from "./replay";
 function describeReplay(record: ReplayRecord): string {
   const c = record.config;
   const mode = (c.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
-  const winner = record.winner === null ? "no winner" : `P${record.winner + 1} won`;
+  const winner = record.endReason === "draw" ? "draw" : record.winner === null ? "no winner" : `P${record.winner + 1} won`;
   return `${mode} · ${c.mapSize} · ${c.playerCount}p · ${record.rounds} rounds · ${winner} · ${record.steps.length} steps`;
 }
 
