@@ -81,6 +81,7 @@ export function ReplayViewer({
         zone: null,
         dimNonZone: false,
         now: performance.now(),
+        activeFraction: stateRef.current.turn,
       }, cssW, cssH);
     };
     raf = requestAnimationFrame(draw);

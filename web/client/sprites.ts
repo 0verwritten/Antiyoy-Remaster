@@ -26,6 +26,7 @@ export const SPRITES: Record<string, SpriteRect> = {
   pine: { x: 243, y: 81, w: 80, h: 80 },
   strong_tower: { x: 324, y: 81, w: 80, h: 80 },
   tower: { x: 405, y: 81, w: 80, h: 80 },
+  castle: { x: 486, y: 81, w: 80, h: 80 },
 };
 
 export const ICON_COIN_URL = "https://cdn.jsdelivr.net/gh/0verwritten/Antiyoy-Remaster@master/assets/coin.png";

@@ -1166,6 +1166,7 @@ function buildRenderState(
     zone,
     dimNonZone: dim,
     now: performance.now(),
+    activeFraction: state.turn,
   };
 }
 

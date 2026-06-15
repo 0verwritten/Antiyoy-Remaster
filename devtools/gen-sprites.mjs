@@ -21,12 +21,12 @@ const ICON_COIN_URL = `${CDN}/assets/coin.png`;
 const ICON_ENDTURN_URL = `${CDN}/assets/end_turn.png`;
 const ICON_UNDO_URL = `${CDN}/assets/undo.png`;
 
-// Frames the web renderer draws (render.ts). "castle" exists in the original
-// atlas but is never used by the web client.
+// Frames the web renderer draws (render.ts). "castle" is the province
+// capital / main base sprite.
 const USED = [
   "farm1", "farm2", "farm3", "grave", "house",
   "man0", "man1", "man2", "man3", "palm", "pine",
-  "strong_tower", "tower",
+  "strong_tower", "tower", "castle",
 ];
 const FRAME = 80; // "_low" frame size
 const GUTTER = 1;

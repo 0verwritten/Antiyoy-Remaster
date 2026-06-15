@@ -3,7 +3,7 @@
 // Hex outlines are drawn on territory borders only, like the original.
 
 import { NEUTRAL_FRACTION } from "./game/constants";
-import type { GameState, HexObj, HexTile } from "./game/types";
+import type { Fraction, GameState, HexObj, HexTile } from "./game/types";
 import { type Camera, HEX_SIZE, worldToScreen } from "./camera";
 import { hexCorners, hexToPixel } from "./hex";
 import { settings } from "./settings";
@@ -29,6 +29,8 @@ export interface RenderState {
   dimNonZone: boolean;
   /** Time in ms for animations. */
   now: number;
+  /** Fraction whose turn it is; only its units animate (jump). */
+  activeFraction: Fraction;
   /** Fog of war: indices the viewer can see. null = no fog (see everything). */
   fog?: Set<number> | null;
 }
@@ -435,7 +437,8 @@ function drawObject(
       drawSprite(ctx, "palm", cx, cy, size);
       break;
     case "town":
-      drawSprite(ctx, "house", cx, cy, size);
+      // Province capital / main base — distinct castle sprite, not a house.
+      drawSprite(ctx, "castle", cx, cy, size);
       break;
     case "tower":
       drawSprite(ctx, "tower", cx, cy, size);
@@ -464,9 +467,10 @@ function drawUnit(
   rs: RenderState
 ) {
   const unit = hex.unit!;
-  // Original units jump in place while they can still move.
+  // Original units jump in place while they can still move — but only the
+  // player whose turn it is. Enemy/idle units stay put off-turn.
   let bob = 0;
-  if (unit.readyToMove && settings.unitAnimations) {
+  if (unit.readyToMove && hex.fraction === rs.activeFraction && settings.unitAnimations) {
     const t = (rs.now / 380 + hex.index * 0.7) % 1;
     bob = -Math.abs(Math.sin(t * Math.PI)) * s * 0.18;
   }
