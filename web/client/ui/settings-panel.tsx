@@ -3,8 +3,9 @@
 // Options whose backing feature does not exist yet (sound, autosave, water
 // texture, skins, city names, language) are intentionally absent.
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { resetSettings, saveSettings, settings } from "../settings";
+import { getInstallState, installApp, subscribeToInstallState } from "../pwa";
 import { Chip } from "./controls";
 
 function Toggle({
@@ -33,7 +34,10 @@ function Toggle({
 
 export function SettingsPanel() {
   const [, bump] = useState(0);
+  const [installState, setInstallState] = useState(getInstallState);
   const refresh = () => bump((n) => n + 1);
+
+  useEffect(() => subscribeToInstallState(() => setInstallState(getInstallState())), []);
 
   function setSetting<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) {
     settings[key] = value;
@@ -121,6 +125,33 @@ export function SettingsPanel() {
         >
           {fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
         </button>
+      </div>
+
+      <div>
+        <label className={labelCls}>Install app</label>
+        <button
+          type="button"
+          disabled={installState === "installed" || installState === "unavailable"}
+          onClick={() => {
+            if (installState === "ios") {
+              alert('To install Antiyoy, tap the Share button in Safari, then choose "Add to Home Screen".');
+              return;
+            }
+            void installApp();
+          }}
+          className="min-h-[44px] w-full rounded-xl bg-[#f0eee3] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none disabled:cursor-default disabled:opacity-55 disabled:active:translate-y-0"
+        >
+          {installState === "installed"
+            ? "App installed"
+            : installState === "ios"
+              ? "Add to Home Screen"
+              : installState === "available"
+                ? "Install Antiyoy"
+                : "Install unavailable"}
+        </button>
+        {installState === "unavailable" && (
+          <p className="mt-2 text-xs text-[#5b5a50]">Use your browser menu to install this app when supported.</p>
+        )}
       </div>
 
       <button

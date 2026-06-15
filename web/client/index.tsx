@@ -19,6 +19,9 @@ import { ReplaysScreen } from "./screens/replays";
 import { OnlineScreen } from "./screens/online";
 import { GameScreen } from "./screens/game";
 import { createCampaignLevelGame, ensureCampaignData, levelNeedsData } from "./game/campaign";
+import { setupPwa } from "./pwa";
+
+if (typeof window !== "undefined") setupPwa();
 
 // Canonical domain: the capsule answers on several lakebed subdomains, but the
 // game lives at antiyoy.lakebed.app only.

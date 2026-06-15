@@ -1,4 +1,4 @@
-import { boolean, capsule, endpoint, mutation, query, string, table, text } from "lakebed/server";
+import { boolean, capsule, endpoint, json, mutation, query, string, table, text } from "lakebed/server";
 import type {
   OnlineChatMessage,
   OnlineLobby,
@@ -10,6 +10,22 @@ import type {
 
 type Row = Record<string, unknown> & { id: string; createdAt: string; updatedAt: string };
 type StateHeader = { turn?: number; version?: number; winner?: number | null };
+
+const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#f0eee3"/>
+  <polygon points="256,48 432,144 432,368 256,464 80,368 80,144" fill="#60b55c" stroke="#3a3a33" stroke-width="32"/>
+  <path d="M184 324V188h144v136h-40v-48h-64v48z" fill="#f0eee3" stroke="#3a3a33" stroke-width="20" stroke-linejoin="round"/>
+</svg>`;
+
+const SERVICE_WORKER = `const CACHE = "antiyoy-shell-v1";
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith("antiyoy-shell-") && key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});`;
 
 function requireAccount(ctx: { auth: { isGuest: boolean } }) {
   if (ctx.auth.isGuest) throw new Error("Sign in with Google to play online");
@@ -244,5 +260,52 @@ export default capsule({
 
   endpoints: {
     status: endpoint({ method: "GET", path: "/api/status" }, () => text("ok")),
+    manifest: endpoint({ method: "GET", path: "/api/manifest.webmanifest" }, () =>
+      json(
+        {
+          id: "/",
+          name: "Antiyoy Remaster",
+          short_name: "Antiyoy",
+          description: "A browser remaster of the turn-based strategy game Antiyoy.",
+          start_url: "/",
+          scope: "/",
+          display: "standalone",
+          orientation: "any",
+          background_color: "#f0eee3",
+          theme_color: "#3a3a33",
+          icons: [
+            {
+              src: "/api/app-icon.svg",
+              sizes: "any",
+              type: "image/svg+xml",
+              purpose: "any maskable",
+            },
+          ],
+        },
+        {
+          headers: {
+            "Content-Type": "application/manifest+json; charset=utf-8",
+            "Cache-Control": "public, max-age=3600",
+          },
+        }
+      )
+    ),
+    appIcon: endpoint({ method: "GET", path: "/api/app-icon.svg" }, () =>
+      text(APP_ICON, {
+        headers: {
+          "Content-Type": "image/svg+xml; charset=utf-8",
+          "Cache-Control": "public, max-age=86400",
+        },
+      })
+    ),
+    serviceWorker: endpoint({ method: "GET", path: "/api/sw.js" }, () =>
+      text(SERVICE_WORKER, {
+        headers: {
+          "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "no-cache",
+          "Service-Worker-Allowed": "/",
+        },
+      })
+    ),
   },
 });
