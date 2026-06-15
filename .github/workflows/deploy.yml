@@ -29,4 +29,4 @@ jobs:
         working-directory: web
         env:
           LAKEBED_TOKEN: ${{ secrets.LAKEBED_TOKEN }}
-        run: npx lakebed deploy --json
+        run: npx --yes lakebed@0.0.25 deploy --json
