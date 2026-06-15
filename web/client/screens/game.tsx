@@ -27,7 +27,7 @@ import { clampToIsland, fitToIsland, HEX_SIZE, makeCamera, screenToWorld, zoomAt
 import { pixelToHex, type Point } from "../hex";
 import { renderBoard, type RenderState } from "../render";
 import { aiDelayMs, settings } from "../settings";
-import { ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL } from "../sprites";
+import { ATLAS_URL, ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL, SPRITES } from "../sprites";
 import { displayFractionColor } from "../colors";
 import {
   AUTOSAVE_ID,
@@ -794,33 +794,15 @@ export function GameScreen(props: GameScreenProps) {
                 Restart
               </MenuButton>}
               <MenuButton onClick={() => setPaused("settings")}>Settings</MenuButton>
-              <MenuButton onClick={() => {
-                if (confirm("End this game as a draw?")) finishEarly("draw");
-              }}>Draw game</MenuButton>
-              {props.online ? (
-                <MenuButton onClick={() => {
-                  if (confirm("Resign from this game?")) finishEarly("resign", props.online!.seat);
-                }}>Resign</MenuButton>
-              ) : (
-                <label className="flex flex-col gap-2 text-sm font-bold text-[#2e2e28]">
-                  Resign player
-                  <select
-                    value=""
-                    onChange={(event) => {
-                      const fraction = Number(event.currentTarget.value);
-                      event.currentTarget.value = "";
-                      if (Number.isInteger(fraction) && confirm(`${fractionLabel(state, fraction)} resigns?`)) {
-                        finishEarly("resign", fraction);
-                      }
-                    }}
-                    className="min-h-[48px] rounded-xl bg-[#f0eee3] px-3 font-bold"
-                  >
-                    <option value="">Choose player...</option>
-                    {state.alive.map((alive, fraction) => alive && (
-                      <option key={fraction} value={fraction}>{fractionLabel(state, fraction)}</option>
-                    ))}
-                  </select>
-                </label>
+              {props.online && (
+                <>
+                  <MenuButton onClick={() => {
+                    if (confirm("End this game as a draw?")) finishEarly("draw");
+                  }}>Draw game</MenuButton>
+                  <MenuButton onClick={() => {
+                    if (confirm("Resign from this game?")) finishEarly("resign", props.online!.seat);
+                  }}>Resign</MenuButton>
+                </>
               )}
               <MenuButton onClick={props.onMenu}>Main menu</MenuButton>
             </div>
@@ -970,7 +952,30 @@ function ZoomControls({
   );
 }
 
-/** Compact bottom purchase panel with native mobile-friendly selectors. */
+const ATLAS_WIDTH = 566;
+const ATLAS_HEIGHT = 161;
+
+function Sprite({ name, size }: { name: string; size: number }) {
+  const sprite = SPRITES[name];
+  if (!sprite) return null;
+  const scale = size / sprite.w;
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block"
+      style={{
+        width: size,
+        height: size,
+        backgroundImage: `url(${ATLAS_URL})`,
+        backgroundSize: `${ATLAS_WIDTH * scale}px ${ATLAS_HEIGHT * scale}px`,
+        backgroundPosition: `-${sprite.x * scale}px -${sprite.y * scale}px`,
+        backgroundRepeat: "no-repeat",
+      }}
+    />
+  );
+}
+
+/** Compact bottom purchase panel. */
 function ProvinceHud({
   state,
   province,
@@ -1002,29 +1007,33 @@ function ProvinceHud({
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex-1">
-          <label className="min-w-0">
-            <span className="sr-only">Select warrior</span>
-            <select
-              aria-label="Select warrior"
-              value={pending.kind === "buy" ? String(pending.strength) : ""}
-              onChange={(event) => {
-                const strength = Number(event.currentTarget.value);
-                if (strength) onBuyUnit(strength);
-              }}
-              className="min-h-[48px] w-full rounded-xl bg-[#e2dfc8] px-3 text-sm font-bold text-[#3a3a33] outline-none ring-[#3a3a33] focus:ring-2"
-            >
-              <option value="">Warriors</option>
-              {[1, 2, 3, 4].map((strength) => {
-                const price = getUnitPrice(strength);
-                return (
-                  <option key={strength} value={strength} disabled={money < price}>
-                    Warrior {strength} - {price}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2 sm:flex-1">
+          <div className="grid grid-cols-4 gap-1" aria-label="Select warrior">
+            {[1, 2, 3, 4].map((strength) => {
+              const price = getUnitPrice(strength);
+              const active = pending.kind === "buy" && pending.strength === strength;
+              return (
+                <button
+                  key={strength}
+                  type="button"
+                  disabled={money < price}
+                  onClick={() => onBuyUnit(strength)}
+                  title={`Buy warrior ${strength}`}
+                  aria-label={`Buy warrior ${strength} for ${price}`}
+                  aria-pressed={active}
+                  className={`flex min-h-[48px] min-w-0 flex-col items-center justify-center rounded-xl px-0.5 py-0.5 transition ${
+                    active ? "bg-[#3a3a33]" : "bg-[#e2dfc8]"
+                  } ${money < price ? "opacity-40" : "hover:brightness-95 active:translate-y-[1px]"}`}
+                >
+                  <Sprite name={`man${strength - 1}`} size={28} />
+                  <span className={`flex items-center gap-0.5 text-[10px] font-bold ${active ? "text-[#f0eee3]" : "text-[#3a3a33]"}`}>
+                    <img src={ICON_COIN_URL} alt="" className="h-3 w-3" />
+                    {price}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
           <label className="min-w-0">
             <span className="sr-only">Select building</span>

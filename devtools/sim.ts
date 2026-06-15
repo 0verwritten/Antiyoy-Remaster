@@ -72,6 +72,32 @@ for (const mode of ["antiyoy", "slay"] as const) {
     );
   }
 }
+
+// A decisive capture must remain on the board until the player ends the turn.
+{
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 3 0 0 100#" +
+      "1 0 0 0 4 1 100#" +
+      "2 0 1 3 0 0 10#" +
+      "3 0 1 0 0 0 10",
+    "deferred-victory"
+  );
+  const st = createScenarioGame(scenario);
+  const attacker = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!;
+  const target = st.hexes.find((h) => h.active && h.q === 2 && h.r === 0)!;
+  const capture = applyAction(st, { type: "moveUnit", from: attacker.index, to: target.index });
+  if (!capture.ok) throw new Error(`deferred victory: capture failed: ${capture.reason}`);
+  if (st.winner !== null || !st.victoryPending) {
+    throw new Error("deferred victory: game finished before end turn");
+  }
+  const endTurn = applyAction(st, { type: "endTurn" });
+  if (!endTurn.ok || st.winner !== 0 || st.victoryPending) {
+    throw new Error("deferred victory: end turn did not finalize winner");
+  }
+  console.log("deferred victory: winner finalized on end turn");
+}
+
 // Hold-to-march: a bought unit walks to the marched-to tile through own land.
 {
   const st = createGame({ mapSize: "medium", playerCount: 2, humanCount: 2, seed: 777, mode: "slay" });

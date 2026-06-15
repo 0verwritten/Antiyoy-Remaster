@@ -109,6 +109,7 @@ export type ObjectiveStatus = "ongoing" | "won" | "lost";
 
 export function evaluateCampaign(state: GameState): ObjectiveStatus {
   if (state.endReason === "draw") return "lost";
+  if (state.victoryPending) return "ongoing";
   // The human is always fraction 0 in the campaign.
   if (!state.alive[0]) return "lost";
   const objective = state.session?.objective ?? { type: "destroyEveryone" };

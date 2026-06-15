@@ -163,6 +163,8 @@ export interface GameState {
   alive: boolean[];
   /** Winner fraction, or null while the game is running. */
   winner: Fraction | null;
+  /** A capture eliminated a player; victory is finalized by the next end-turn action. */
+  victoryPending?: boolean;
   /** Non-victory ending, or why the final winner was decided early. */
   endReason?: "draw" | "resignation";
   /** Fractions that voluntarily left the match. */

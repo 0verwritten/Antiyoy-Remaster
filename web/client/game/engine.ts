@@ -756,6 +756,8 @@ function doBuild(
 
 function doEndTurn(state: GameState, endedAt: number): ActionResult {
   recordTurnTiming(state, endedAt, "endTurn");
+  finalizeVictory(state);
+  if (isGameOver(state)) return { ok: true };
   advanceTurn(state, endedAt);
   return { ok: true };
 }
@@ -802,6 +804,7 @@ function doResign(state: GameState, fraction: number, endedAt: number): ActionRe
   }
   rebuildAllProvinces(state, false);
   checkElimination(state);
+  finalizeVictory(state);
   if (state.winner !== null) {
     state.endReason = "resignation";
   } else if (resignedOnTurn) {
@@ -882,13 +885,20 @@ function spreadTrees(state: GameState) {
 }
 
 function checkElimination(state: GameState) {
+  let eliminated = false;
   for (let p = 0; p < state.config.playerCount; p++) {
     if (!state.alive[p]) continue;
     if (getProvincesOf(state, p).length === 0) {
       state.alive[p] = false;
+      eliminated = true;
       onFractionEliminated(state, p); // scrub diplomacy (no-op without diplomacy)
     }
   }
+  if (eliminated) state.victoryPending = true;
+}
+
+function finalizeVictory(state: GameState) {
+  state.victoryPending = false;
   const survivors: number[] = [];
   for (let p = 0; p < state.config.playerCount; p++) {
     if (state.alive[p]) survivors.push(p);

@@ -41,6 +41,8 @@ export function CampaignScreen({
       style={{ background: MENU_BACKGROUND_COLOR }}
     >
       <div className="w-full max-w-md flex flex-col gap-5 py-4">
+        <MenuButton onClick={onBack}>Back</MenuButton>
+
         <header className="text-center">
           <h1 className="text-4xl font-black tracking-tight text-[#f0eee3] drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">
             Campaign

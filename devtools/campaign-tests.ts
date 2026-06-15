@@ -47,10 +47,11 @@ for (const level of [1, 9, 24, 50, 100, 155]) {
 }
 
 // --- objective evaluation ----------------------------------------------------
-function fakeState(opts: { alive: boolean[]; winner: number | null; objective?: unknown }) {
+function fakeState(opts: { alive: boolean[]; winner: number | null; objective?: unknown; victoryPending?: boolean }) {
   return {
     alive: opts.alive,
     winner: opts.winner,
+    victoryPending: opts.victoryPending,
     session: { source: "campaign", objective: opts.objective ?? { type: "destroyEveryone" } },
   } as unknown as Parameters<typeof evaluateCampaign>[0];
 }
@@ -64,6 +65,10 @@ assert(
 assert(
   evaluateCampaign(fakeState({ alive: [true, true, false], winner: null, objective: { type: "destroyKingdom", target: 2 } })) === "won",
   "destroyKingdom won when target dead"
+);
+assert(
+  evaluateCampaign(fakeState({ alive: [true, true, false], winner: null, objective: { type: "destroyKingdom", target: 2 }, victoryPending: true })) === "ongoing",
+  "destroyKingdom waits for end turn while victory is pending"
 );
 assert(
   evaluateCampaign(fakeState({ alive: [true, true], winner: 1, objective: { type: "ensureKingdomWins", target: 1 } })) === "won",
