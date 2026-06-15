@@ -76,6 +76,7 @@ export function ReplayViewer({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       renderBoard(ctx, stateRef.current, cameraRef.current, {
         selectedHex: -1,
+        protectionSource: -1,
         highlightProvince: -1,
         zone: null,
         dimNonZone: false,

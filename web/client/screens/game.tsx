@@ -86,6 +86,7 @@ export function GameScreen(props: GameScreenProps) {
   const camRef = useRef<Camera>(makeCamera());
   const pendingRef = useRef<Pending>({ kind: "none" });
   const selectedHexRef = useRef<number>(-1);
+  const protectionSourceRef = useRef<number>(-1);
   const highlightProvinceRef = useRef<number>(-1);
   const aiThinkingRef = useRef<boolean>(false);
   const dirtyRef = useRef<boolean>(true);
@@ -172,7 +173,13 @@ export function GameScreen(props: GameScreenProps) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const pending = pendingRef.current;
-      const rs: RenderState = buildRenderState(st, pending, selectedHexRef.current, highlightProvinceRef.current);
+      const rs: RenderState = buildRenderState(
+        st,
+        pending,
+        selectedHexRef.current,
+        highlightProvinceRef.current,
+        protectionSourceRef.current
+      );
       rs.fog = computeFog(st, fogCacheRef);
       // Always redraw (animations + simplicity).
       renderBoard(ctx, st, camRef.current, rs, cssW, cssH);
@@ -194,6 +201,7 @@ export function GameScreen(props: GameScreenProps) {
   const clearSelection = useCallback(() => {
     pendingRef.current = { kind: "none" };
     selectedHexRef.current = -1;
+    protectionSourceRef.current = -1;
     highlightProvinceRef.current = -1;
     refreshUi();
   }, [refreshUi]);
@@ -220,6 +228,7 @@ export function GameScreen(props: GameScreenProps) {
     setActionObserver(entry.state, recordAction);
     pendingRef.current = { kind: "none" };
     selectedHexRef.current = -1;
+    protectionSourceRef.current = -1;
     highlightProvinceRef.current = -1;
     forceRender();
     refreshUi();
@@ -482,11 +491,21 @@ export function GameScreen(props: GameScreenProps) {
       selectUnit(st, idx);
       return;
     }
+    if (hex.fraction === me && isDefensiveBuilding(hex.obj)) {
+      const prov = getProvinceByHex(st, idx);
+      pendingRef.current = { kind: "none" };
+      selectedHexRef.current = idx;
+      protectionSourceRef.current = idx;
+      highlightProvinceRef.current = prov ? prov.id : -1;
+      refreshUi();
+      return;
+    }
     if (hex.fraction === me) {
       const prov = getProvinceByHex(st, idx);
       if (prov) {
         pendingRef.current = { kind: "none" };
         selectedHexRef.current = -1; // the whole territory is highlighted instead
+        protectionSourceRef.current = -1;
         highlightProvinceRef.current = prov.id;
         refreshUi();
         return;
@@ -498,6 +517,7 @@ export function GameScreen(props: GameScreenProps) {
   function selectUnit(st: GameState, idx: number) {
     pendingRef.current = { kind: "unit", from: idx };
     selectedHexRef.current = idx;
+    protectionSourceRef.current = -1;
     const prov = getProvinceByHex(st, idx);
     highlightProvinceRef.current = prov ? prov.id : -1;
     dirtyRef.current = true;
@@ -507,6 +527,7 @@ export function GameScreen(props: GameScreenProps) {
   function afterAction(st: GameState, provinceId: number) {
     pendingRef.current = { kind: "none" };
     selectedHexRef.current = -1;
+    protectionSourceRef.current = -1;
     // Re-select the province (if it still exists) so the HUD stays open.
     const prov = st.provinces.find((p) => p.id === provinceId);
     highlightProvinceRef.current = prov ? prov.id : -1;
@@ -642,11 +663,13 @@ export function GameScreen(props: GameScreenProps) {
           onBuyUnit={(strength) => {
             pendingRef.current = { kind: "buy", provinceId: selectedProvince.id, strength };
             selectedHexRef.current = -1;
+            protectionSourceRef.current = -1;
             refreshUi();
           }}
           onBuild={(kind) => {
             pendingRef.current = { kind: "build", provinceId: selectedProvince.id, buildKind: kind };
             selectedHexRef.current = -1;
+            protectionSourceRef.current = -1;
             refreshUi();
           }}
         />
@@ -1017,7 +1040,8 @@ function buildRenderState(
   state: GameState,
   pending: Pending,
   selectedHex: number,
-  highlightProvince: number
+  highlightProvince: number,
+  protectionSource: number
 ): RenderState {
   let zone: Set<number> | null = null;
   let dim = false;
@@ -1039,9 +1063,14 @@ function buildRenderState(
   }
   return {
     selectedHex,
+    protectionSource,
     highlightProvince,
     zone,
     dimNonZone: dim,
     now: performance.now(),
   };
+}
+
+function isDefensiveBuilding(obj: GameState["hexes"][number]["obj"]): boolean {
+  return obj === "town" || obj === "tower" || obj === "strongTower";
 }

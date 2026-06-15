@@ -11,13 +11,16 @@ import {
   ATLAS_URL,
   ORIGINAL_FRACTION_COLORS,
   ORIGINAL_NEUTRAL_COLOR,
+  ICON_DEFENSE_URL,
   SPRITES,
   WATER_COLOR,
 } from "./sprites";
 
 export interface RenderState {
-  /** Hex index of the currently selected hex (a selected unit), or -1. */
+  /** Hex index of the currently selected unit or building, or -1. */
   selectedHex: number;
+  /** Hex index of a selected defensive building whose coverage is shown, or -1. */
+  protectionSource: number;
   /** Province id whose whole territory should be highlighted, or -1. */
   highlightProvince: number;
   /** Set of hex indices that are "active" interaction targets (move/buy/build zone). */
@@ -42,6 +45,14 @@ atlas.onload = () => {
 // pixels). jsDelivr sends Access-Control-Allow-Origin: *.
 atlas.crossOrigin = "anonymous";
 atlas.src = ATLAS_URL;
+
+const defenseIcon = new Image();
+let defenseIconReady = false;
+defenseIcon.onload = () => {
+  defenseIconReady = true;
+};
+defenseIcon.crossOrigin = "anonymous";
+defenseIcon.src = ICON_DEFENSE_URL;
 
 function drawSprite(
   ctx: CanvasRenderingContext2D,
@@ -169,7 +180,11 @@ export function renderBoard(
       ctx.fill();
     }
   }
-  // Pass 4: zone markers + selected-unit ring.
+  // Defensive buildings protect their own tile and adjacent friendly land.
+  if (rs.protectionSource >= 0) {
+    drawProtection(ctx, state, cam, rs);
+  }
+  // Pass 4: zone markers + selected-hex ring.
   if (rs.zone && rs.dimNonZone) {
     for (const idx of rs.zone) {
       const hex = state.hexes[idx];
@@ -180,6 +195,54 @@ export function renderBoard(
   if (rs.selectedHex >= 0 && state.hexes[rs.selectedHex]?.active) {
     drawSelection(ctx, state.hexes[rs.selectedHex], cam, rs.now);
   }
+}
+
+function drawProtection(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  cam: Camera,
+  rs: RenderState
+) {
+  const source = state.hexes[rs.protectionSource];
+  if (!source?.active || !isDefensiveBuilding(source.obj)) return;
+  const protectedHexes: HexTile[] = [source];
+  for (const index of source.neighbors) {
+    const neighbor = state.hexes[index];
+    if (neighbor?.active && neighbor.fraction === source.fraction) protectedHexes.push(neighbor);
+  }
+
+  for (const hex of protectedHexes) {
+    if (rs.fog && !rs.fog.has(hex.index)) continue;
+    const { cx, cy, s } = tileScreen(hex, cam);
+    const size = Math.max(10, s * 0.48);
+    const x = cx + s * 0.25 - size / 2;
+    const y = cy - s * 0.3 - size / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.88;
+    if (defenseIconReady) {
+      ctx.drawImage(defenseIcon, x, y, size, size);
+    } else {
+      drawShieldFallback(ctx, x, y, size);
+    }
+    ctx.restore();
+  }
+}
+
+function isDefensiveBuilding(obj: HexObj): boolean {
+  return obj === "town" || obj === "tower" || obj === "strongTower";
+}
+
+function drawShieldFallback(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.fillStyle = "rgba(20,20,20,0.9)";
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.5, y + size * 0.08);
+  ctx.lineTo(x + size * 0.82, y + size * 0.22);
+  ctx.lineTo(x + size * 0.76, y + size * 0.62);
+  ctx.quadraticCurveTo(x + size * 0.68, y + size * 0.82, x + size * 0.5, y + size * 0.92);
+  ctx.quadraticCurveTo(x + size * 0.32, y + size * 0.82, x + size * 0.24, y + size * 0.62);
+  ctx.lineTo(x + size * 0.18, y + size * 0.22);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function hexPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, screenSize: number) {

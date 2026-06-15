@@ -31,6 +31,7 @@ export const SPRITES: Record<string, SpriteRect> = {
 export const ICON_COIN_URL = "https://cdn.jsdelivr.net/gh/0verwritten/Antiyoy-Remaster@master/assets/coin.png";
 export const ICON_ENDTURN_URL = "https://cdn.jsdelivr.net/gh/0verwritten/Antiyoy-Remaster@master/assets/end_turn.png";
 export const ICON_UNDO_URL = "https://cdn.jsdelivr.net/gh/0verwritten/Antiyoy-Remaster@master/assets/undo.png";
+export const ICON_DEFENSE_URL = "https://cdn.jsdelivr.net/gh/0verwritten/Antiyoy-Remaster@master/assets/defense_icon.png";
 
 // Original hex tile palette sampled from assets/hex_*.png
 export const ORIGINAL_FRACTION_COLORS = [
