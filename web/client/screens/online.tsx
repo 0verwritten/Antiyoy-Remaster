@@ -52,7 +52,10 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
         <h1 className="text-center text-4xl font-black text-[#f0eee3]">Online</h1>
         <div className="rounded-3xl bg-[#b3ae7e] p-5 text-center text-[#2e2e28] shadow-[0_4px_0_rgba(0,0,0,0.2)]">
           <p className="mb-4 font-semibold">Sign in to join persistent lobbies and play with other people.</p>
-          <SignInWithGoogle className="min-h-[52px] rounded-2xl bg-[#f0eee3] px-6 text-lg font-bold shadow" />
+          <SignInWithGoogle
+            returnTo="/?screen=online"
+            className="min-h-[52px] rounded-2xl bg-[#f0eee3] px-6 text-lg font-bold shadow"
+          />
         </div>
         <MenuButton onClick={onBack}>Back</MenuButton>
       </OnlineShell>

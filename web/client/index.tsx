@@ -48,7 +48,12 @@ if (typeof document !== "undefined" && !document.querySelector("link[rel='icon']
 }
 
 export function App() {
-  const [screen, setScreen] = useState<Screen>({ kind: "main" });
+  const [screen, setScreen] = useState<Screen>(() => {
+    if (typeof location !== "undefined" && new URLSearchParams(location.search).get("screen") === "online") {
+      return { kind: "online" };
+    }
+    return { kind: "main" };
+  });
   const stateRef = useRef<GameState | null>(null);
   const configRef = useRef<GameConfig | null>(null);
   // Replay history restored from a loaded save (null for fresh games).
