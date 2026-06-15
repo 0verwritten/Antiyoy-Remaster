@@ -16,6 +16,7 @@ import { SettingsScreen } from "./screens/settings";
 import { AboutScreen } from "./screens/about";
 import { LoadScreen } from "./screens/load";
 import { ReplaysScreen } from "./screens/replays";
+import { OnlineScreen } from "./screens/online";
 import { GameScreen } from "./screens/game";
 import { createCampaignLevelGame, ensureCampaignData, levelNeedsData } from "./game/campaign";
 
@@ -153,6 +154,7 @@ export function App() {
         <ChooseModeScreen
           onSkirmish={() => setScreen({ kind: "skirmish" })}
           onCampaign={() => setScreen({ kind: "campaign" })}
+          onOnline={() => setScreen({ kind: "online" })}
           onBack={() => setScreen({ kind: "main" })}
         />
       );
@@ -170,6 +172,8 @@ export function App() {
           onPlayLevel={startCampaignLevel}
         />
       );
+    case "online":
+      return <OnlineScreen onBack={() => setScreen({ kind: "chooseMode" })} />;
     case "settings":
       return <SettingsScreen onBack={() => setScreen({ kind: "main" })} />;
     case "about":

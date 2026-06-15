@@ -7,10 +7,12 @@ import { MenuButton } from "../ui/controls";
 export function ChooseModeScreen({
   onSkirmish,
   onCampaign,
+  onOnline,
   onBack,
 }: {
   onSkirmish: () => void;
   onCampaign: () => void;
+  onOnline: () => void;
   onBack: () => void;
 }) {
   return (
@@ -29,6 +31,9 @@ export function ChooseModeScreen({
         </MenuButton>
         <MenuButton onClick={onCampaign} className="text-xl">
           Campaign
+        </MenuButton>
+        <MenuButton onClick={onOnline} className="text-xl">
+          Online
         </MenuButton>
         <MenuButton onClick={onBack}>Back</MenuButton>
       </div>

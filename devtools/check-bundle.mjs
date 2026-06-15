@@ -1,13 +1,13 @@
 // Builds the lakebed capsule and fails if the client bundle is over budget.
-// lakebed's hard artifact limit is 1 MB; we gate at 900 KB to keep headroom
-// for campaign data and diplomacy code. Run before every deploy.
+// lakebed's hard artifact limit is 1 MB. Auth, reactive queries, and mutations
+// add the Lakebed client transport runtime, so the online build gates at 960 KB.
 // Usage: node devtools/check-bundle.mjs [budgetBytes]
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const BUDGET = Number(process.argv[2] ?? 900 * 1024);
+const BUDGET = Number(process.argv[2] ?? 960 * 1024);
 const webDir = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
 
 execFileSync("npx", ["lakebed", "build", "--target", "anonymous"], {

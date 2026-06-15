@@ -21,6 +21,7 @@ import {
 } from "../game/engine";
 import { aiTakeTurn } from "../game/ai";
 import type { GameConfig, GameState, Province } from "../game/types";
+import type { OnlineChatMessage } from "../../shared/online";
 import { clampToIsland, fitToIsland, HEX_SIZE, makeCamera, screenToWorld, zoomAt, type Camera } from "../camera";
 import { pixelToHex, type Point } from "../hex";
 import { renderBoard, type RenderState } from "../render";
@@ -59,6 +60,16 @@ export interface GameScreenProps {
   /** Campaign hooks (present only for campaign games). */
   onCampaignExit?: () => void;
   onCampaignPlayLevel?: (level: number) => void;
+  online?: {
+    seat: number;
+    isHost: boolean;
+    humanSlots: number;
+    players: string[];
+    messages: OnlineChatMessage[];
+    sendChat: (body: string) => Promise<void>;
+    onAction: (actor: number, state: GameState) => void;
+    stateRevision: number;
+  };
 }
 
 const UNDO_STACK_LIMIT = 50;
@@ -91,6 +102,7 @@ export function GameScreen(props: GameScreenProps) {
   // Pause menu overlays the board so the game is never unmounted.
   const [paused, setPaused] = useState<"none" | "menu" | "settings">("none");
   const [justSaved, setJustSaved] = useState(false);
+  const [showOnlineChat, setShowOnlineChat] = useState(false);
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
@@ -101,14 +113,19 @@ export function GameScreen(props: GameScreenProps) {
       actor: event.actor,
       moneyDelta: event.moneyAfter.map((money, fraction) => money - event.moneyBefore[fraction]),
     });
-  }, []);
+    props.online?.onAction(event.actor, stateRef.current!);
+  }, [props.online, stateRef]);
+
+  const canControlTurn = useCallback((st: GameState) => {
+    return props.online ? st.turn === props.online.seat : isHumanTurn(st);
+  }, [props.online]);
 
   useEffect(() => {
     const live = stateRef.current;
     if (!live) return;
     setActionObserver(live, recordAction);
     return () => setActionObserver(live, null);
-  }, [stateRef, recordAction]);
+  }, [stateRef, recordAction, props.online?.stateRevision]);
 
   // --- camera fit on first mount ---
   const fittedRef = useRef(false);
@@ -194,7 +211,7 @@ export function GameScreen(props: GameScreenProps) {
 
   const doUndo = useCallback(() => {
     const st = stateRef.current;
-    if (!st || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+    if (!st || props.online || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
     const entry = undoRef.current.pop();
     if (!entry) return;
     setActionObserver(st, null);
@@ -244,13 +261,14 @@ export function GameScreen(props: GameScreenProps) {
     }
     if (isHumanTurn(st)) {
       // Human's turn. If hotseat (humanCount>=2) show pass screen.
-      if (st.config.humanCount >= 2) {
+      if (!props.online && st.config.humanCount >= 2) {
         setScreen({ kind: "pass", fraction: st.turn });
       }
       refreshUi();
       return;
     }
     // AI turn(s): chain with delays so progress is visible.
+    if (props.online && !props.online.isHost) return;
     if (aiThinkingRef.current) return; // a chain is already running
     aiThinkingRef.current = true;
     const chainState = st;
@@ -266,7 +284,7 @@ export function GameScreen(props: GameScreenProps) {
       const campaignDefeat = s.session?.source === "campaign" && !s.alive[0];
       if (s.winner !== null || isHumanTurn(s) || campaignDefeat) {
         aiThinkingRef.current = false;
-        if (s.winner === null && !campaignDefeat && s.config.humanCount >= 2 && isHumanTurn(s)) {
+        if (!props.online && s.winner === null && !campaignDefeat && s.config.humanCount >= 2 && isHumanTurn(s)) {
           setScreen({ kind: "pass", fraction: s.turn });
         }
         forceRender();
@@ -279,7 +297,7 @@ export function GameScreen(props: GameScreenProps) {
       setTimeout(step, aiDelayMs());
     };
     setTimeout(step, aiDelayMs());
-  }, [stateRef, forceRender, refreshUi, setScreen]);
+  }, [stateRef, forceRender, refreshUi, setScreen, props.online]);
 
   // Spectator games (humanCount 0) and AI-first setups need the chain to
   // start on its own; re-arm whenever a new game begins.
@@ -312,19 +330,19 @@ export function GameScreen(props: GameScreenProps) {
   const doEndTurn = useCallback(() => {
     const st = stateRef.current;
     if (!st || aiThinkingRef.current || st.winner !== null) return;
-    if (!isHumanTurn(st)) return;
+    if (!canControlTurn(st)) return;
     if (settings.confirmEndTurn && !confirm("End turn?")) return;
     clearSelection();
     undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
     // End-of-human-turn autosave (turns are final, so this never races undo).
-    if (st.config.humanCount > 0 && st.winner === null) {
+    if (!props.online && st.config.humanCount > 0 && st.winner === null) {
       const record = buildSaveRecord(AUTOSAVE_ID, "Autosave");
       if (record) void putSave(record).catch(() => {});
     }
     forceRender();
     runAiIfNeeded();
-  }, [stateRef, clearSelection, forceRender, runAiIfNeeded, buildSaveRecord]);
+  }, [stateRef, clearSelection, forceRender, runAiIfNeeded, buildSaveRecord, canControlTurn, props.online]);
 
   // Persist a replay record once when the game ends.
   useEffect(() => {
@@ -363,7 +381,7 @@ export function GameScreen(props: GameScreenProps) {
   function onLongPress(screenPt: Point) {
     if (!settings.holdToMarch) return;
     const st = stateRef.current;
-    if (!st || aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+    if (!st || aiThinkingRef.current || st.winner !== null || !canControlTurn(st)) return;
     const world = screenToWorld(camRef.current, screenPt);
     const idx = pixelToHex(st, world, HEX_SIZE);
     if (idx < 0) return;
@@ -381,7 +399,7 @@ export function GameScreen(props: GameScreenProps) {
   function onTap(screenPt: Point) {
     const st = stateRef.current;
     if (!st || aiThinkingRef.current || st.winner !== null) return;
-    if (!isHumanTurn(st)) return;
+    if (!canControlTurn(st)) return;
     const world = screenToWorld(camRef.current, screenPt);
     const idx = pixelToHex(st, world, HEX_SIZE);
     if (idx < 0) {
@@ -520,7 +538,7 @@ export function GameScreen(props: GameScreenProps) {
         fitCamera();
         return;
       }
-      if (aiThinkingRef.current || st.winner !== null || !isHumanTurn(st)) return;
+      if (aiThinkingRef.current || st.winner !== null || !canControlTurn(st)) return;
       if (e.key === "Escape") {
         clearSelection();
       } else if (e.key === "e" || e.key === "E" || e.key === "Enter") {
@@ -540,7 +558,7 @@ export function GameScreen(props: GameScreenProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stateRef, screen.kind, paused, clearSelection, doEndTurn, doUndo, refreshUi, zoomCamera, fitCamera]);
+  }, [stateRef, screen.kind, paused, clearSelection, doEndTurn, doUndo, refreshUi, zoomCamera, fitCamera, canControlTurn]);
 
   // Selected province for the HUD.
   const selectedProvince = currentSelectedProvince(state, highlightProvinceRef.current);
@@ -574,7 +592,7 @@ export function GameScreen(props: GameScreenProps) {
     }
   }, [campaignLevel, campaignStatus]);
 
-  const human = isHumanTurn(state) && !aiThinkingRef.current && state.winner === null;
+  const human = canControlTurn(state) && !aiThinkingRef.current && state.winner === null;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#2a628f] text-slate-100 select-none">
@@ -585,7 +603,17 @@ export function GameScreen(props: GameScreenProps) {
       />
 
       {/* Top bar */}
-      <TopBar state={state} onMenu={() => setPaused("menu")} />
+      <TopBar state={state} onMenu={() => setPaused("menu")} playerNames={props.online?.players} />
+
+      {props.online && (
+        <button
+          type="button"
+          onClick={() => setShowOnlineChat((value) => !value)}
+          className="absolute right-24 top-2 min-h-[40px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow"
+        >
+          Chat{props.online.messages.length ? ` (${props.online.messages.length})` : ""}
+        </button>
+      )}
 
       <ZoomControls
         onZoomIn={() => zoomCamera(1.2)}
@@ -639,7 +667,7 @@ export function GameScreen(props: GameScreenProps) {
       )}
 
       {/* Undo and end-turn buttons (original icons); corners swap in left-handed mode */}
-      {human && (
+      {human && !props.online && (
         <button
           type="button"
           onClick={doUndo}
@@ -664,6 +692,14 @@ export function GameScreen(props: GameScreenProps) {
         </button>
       )}
 
+      {props.online && showOnlineChat && (
+        <OnlineChatPanel
+          messages={props.online.messages}
+          sendChat={props.online.sendChat}
+          onClose={() => setShowOnlineChat(false)}
+        />
+      )}
+
       {/* Pause menu: the game stays mounted underneath */}
       {paused !== "none" && state.winner === null && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -671,7 +707,7 @@ export function GameScreen(props: GameScreenProps) {
             <div className="flex w-full max-w-xs flex-col gap-3 rounded-3xl bg-[#b3ae7e] p-6 shadow-[0_4px_0_rgba(0,0,0,0.25)]">
               <h2 className="mb-1 text-center text-2xl font-black text-[#2e2e28]">Paused</h2>
               <MenuButton onClick={() => setPaused("none")}>Resume</MenuButton>
-              <MenuButton
+              {!props.online && <MenuButton
                 onClick={() => {
                   const cfg = props.configRef.current;
                   const mode = (cfg?.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
@@ -691,8 +727,8 @@ export function GameScreen(props: GameScreenProps) {
                 }}
               >
                 {justSaved ? "Saved ✓" : "Save"}
-              </MenuButton>
-              <MenuButton
+              </MenuButton>}
+              {!props.online && <MenuButton
                 onClick={() => {
                   if (!confirm("Restart this game from the beginning?")) return;
                   if (campaignLevel != null) props.onCampaignPlayLevel?.(campaignLevel);
@@ -700,7 +736,7 @@ export function GameScreen(props: GameScreenProps) {
                 }}
               >
                 Restart
-              </MenuButton>
+              </MenuButton>}
               <MenuButton onClick={() => setPaused("settings")}>Settings</MenuButton>
               <MenuButton onClick={props.onMenu}>Main menu</MenuButton>
             </div>
@@ -761,9 +797,11 @@ function fractionLabel(state: GameState, f: number): string {
 function TopBar({
   state,
   onMenu,
+  playerNames,
 }: {
   state: GameState;
   onMenu: () => void;
+  playerNames?: string[];
 }) {
   const f = state.turn;
   const color = displayFractionColor(state.config, f);
@@ -774,7 +812,7 @@ function TopBar({
           className="inline-block h-4 w-4 rounded-full ring-1 ring-black/30"
           style={{ background: color }}
         />
-        <span className="text-sm font-bold">{fractionLabel(state, f)}</span>
+        <span className="text-sm font-bold">{playerNames?.[f] ?? fractionLabel(state, f)}</span>
         <span className="text-xs opacity-60">Round {state.round + 1}</span>
       </div>
       <button
@@ -784,6 +822,33 @@ function TopBar({
       >
         Menu
       </button>
+    </div>
+  );
+}
+
+function OnlineChatPanel({ messages, sendChat, onClose }: {
+  messages: OnlineChatMessage[];
+  sendChat: (body: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute bottom-4 right-4 z-10 flex h-[360px] w-[min(22rem,calc(100vw-2rem))] flex-col rounded-2xl bg-[#b3ae7e] p-3 text-[#2e2e28] shadow-xl">
+      <div className="flex items-center justify-between"><strong>Game chat</strong><button type="button" onClick={onClose} className="px-2 font-black">X</button></div>
+      <div className="my-2 flex-1 space-y-2 overflow-y-auto rounded-xl bg-[#e2dfc8] p-3">
+        {messages.map((message) => <p key={message.id} className="text-sm"><strong>{message.authorName}:</strong> {message.body}</p>)}
+      </div>
+      <form className="flex gap-2" onSubmit={(event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const input = form.elements.namedItem("message") as HTMLInputElement;
+        const body = input.value.trim();
+        if (!body) return;
+        input.value = "";
+        void sendChat(body);
+      }}>
+        <input name="message" maxLength={300} className="min-w-0 flex-1 rounded-xl bg-[#f0eee3] px-3" placeholder="Message" />
+        <button type="submit" className="rounded-xl bg-[#3a3a33] px-3 font-bold text-[#f0eee3]">Send</button>
+      </form>
     </div>
   );
 }

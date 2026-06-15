@@ -9,6 +9,7 @@
 export type Screen =
   | { kind: "main" }
   | { kind: "chooseMode" } // Play submenu: Skirmish / Campaign
+  | { kind: "online" }
   | { kind: "skirmish" }
   | { kind: "campaign" }
   | { kind: "settings" }
