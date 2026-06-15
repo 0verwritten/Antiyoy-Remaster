@@ -27,3 +27,11 @@ export function clearOnlineAuthReturn() {
     // Best effort only.
   }
 }
+
+export function clearOnlineDeepLink() {
+  if (typeof location === "undefined" || typeof history === "undefined") return;
+  const url = new URL(location.href);
+  if (url.searchParams.get("screen") !== "online") return;
+  url.searchParams.delete("screen");
+  history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+}

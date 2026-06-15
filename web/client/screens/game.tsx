@@ -31,6 +31,7 @@ import { ATLAS_URL, ICON_COIN_URL, ICON_ENDTURN_URL, ICON_UNDO_URL, SPRITES } fr
 import { displayFractionColor } from "../colors";
 import {
   AUTOSAVE_ID,
+  deleteSave,
   newRecordId,
   putReplay,
   putSave,
@@ -61,6 +62,7 @@ export interface GameScreenProps {
   /** Campaign hooks (present only for campaign games). */
   onCampaignExit?: () => void;
   onCampaignPlayLevel?: (level: number) => void;
+  onCampaignCompleted?: () => void;
   online?: {
     seat: number;
     isHost: boolean;
@@ -358,7 +360,9 @@ export function GameScreen(props: GameScreenProps) {
     undoRef.current = []; // turns are final once ended
     applyAction(st, { type: "endTurn" });
     // End-of-human-turn autosave (turns are final, so this never races undo).
-    if (!props.online && st.config.humanCount > 0 && !isGameOver(st)) {
+    const campaignFinished =
+      st.session?.source === "campaign" && evaluateCampaign(st) !== "ongoing";
+    if (!props.online && st.config.humanCount > 0 && !isGameOver(st) && !campaignFinished) {
       const record = buildSaveRecord(AUTOSAVE_ID, "Autosave");
       if (record) void putSave(record).catch(() => {});
     }
@@ -643,8 +647,10 @@ export function GameScreen(props: GameScreenProps) {
     if (campaignLevel != null && campaignStatus === "won" && !campaignDoneRef.current) {
       campaignDoneRef.current = true;
       markLevelCompleted(campaignLevel);
+      props.onCampaignCompleted?.();
+      void deleteSave(AUTOSAVE_ID).catch(() => {});
     }
-  }, [campaignLevel, campaignStatus]);
+  }, [campaignLevel, campaignStatus, props.onCampaignCompleted]);
 
   const human = canControlTurn(state) && !aiThinkingRef.current && !isGameOver(state);
 
@@ -1007,8 +1013,8 @@ function ProvinceHud({
           </span>
         </div>
 
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2 sm:flex-1">
-          <div className="grid grid-cols-4 gap-1" aria-label="Select warrior">
+        <div className="grid grid-cols-7 gap-1 sm:flex-1 sm:gap-2">
+          <div className="col-span-4 grid grid-cols-4 gap-1 sm:gap-2" aria-label="Select warrior">
             {[1, 2, 3, 4].map((strength) => {
               const price = getUnitPrice(strength);
               const active = pending.kind === "buy" && pending.strength === strength;
@@ -1035,25 +1041,33 @@ function ProvinceHud({
             })}
           </div>
 
-          <label className="min-w-0">
-            <span className="sr-only">Select building</span>
-            <select
-              aria-label="Select building"
-              value={pending.kind === "build" ? pending.buildKind : ""}
-              onChange={(event) => {
-                const kind = event.currentTarget.value;
-                if (kind === "farm" || kind === "tower" || kind === "strongTower") onBuild(kind);
-              }}
-              className="min-h-[48px] w-full rounded-xl bg-[#e2dfc8] px-3 text-sm font-bold text-[#3a3a33] outline-none ring-[#3a3a33] focus:ring-2"
-            >
-              <option value="">Buildings</option>
-              <option value="farm" disabled={money < farmPrice}>Farm - {farmPrice}</option>
-              <option value="tower" disabled={money < PRICE_TOWER}>Tower - {PRICE_TOWER}</option>
-              <option value="strongTower" disabled={money < PRICE_STRONG_TOWER}>
-                Strong tower - {PRICE_STRONG_TOWER}
-              </option>
-            </select>
-          </label>
+          {([
+            { kind: "farm", sprite: "farm1", price: farmPrice, label: "farm" },
+            { kind: "tower", sprite: "tower", price: PRICE_TOWER, label: "tower" },
+            { kind: "strongTower", sprite: "strong_tower", price: PRICE_STRONG_TOWER, label: "strong tower" },
+          ] as const).map(({ kind, sprite, price, label }) => {
+            const active = pending.kind === "build" && pending.buildKind === kind;
+            return (
+              <button
+                key={kind}
+                type="button"
+                disabled={money < price}
+                onClick={() => onBuild(kind)}
+                title={`Build ${label}`}
+                aria-label={`Build ${label} for ${price}`}
+                aria-pressed={active}
+                className={`flex min-h-[48px] min-w-0 flex-col items-center justify-center rounded-xl px-0.5 py-0.5 transition ${
+                  active ? "bg-[#3a3a33]" : "bg-[#e2dfc8]"
+                } ${money < price ? "opacity-40" : "hover:brightness-95 active:translate-y-[1px]"}`}
+              >
+                <Sprite name={sprite} size={28} />
+                <span className={`flex items-center gap-0.5 text-[10px] font-bold ${active ? "text-[#f0eee3]" : "text-[#3a3a33]"}`}>
+                  <img src={ICON_COIN_URL} alt="" className="h-3 w-3" />
+                  {price}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

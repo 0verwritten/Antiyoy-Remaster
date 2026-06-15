@@ -18,9 +18,9 @@ import { LoadScreen } from "./screens/load";
 import { ReplaysScreen } from "./screens/replays";
 import { OnlineScreen } from "./screens/online";
 import { GameScreen } from "./screens/game";
-import { createCampaignLevelGame, ensureCampaignData, levelNeedsData } from "./game/campaign";
+import { createCampaignLevelGame, ensureCampaignData, evaluateCampaign, levelNeedsData } from "./game/campaign";
 import { setupPwa } from "./pwa";
-import { shouldReturnToOnline } from "./online-return";
+import { clearOnlineDeepLink, shouldReturnToOnline } from "./online-return";
 
 if (typeof window !== "undefined") setupPwa();
 
@@ -48,6 +48,12 @@ if (typeof document !== "undefined" && !document.querySelector("link[rel='icon']
   document.head.appendChild(link);
 }
 
+function isResumableState(state: GameState | null): state is GameState {
+  if (!state || isGameOver(state)) return false;
+  if (state.session?.source === "campaign") return evaluateCampaign(state) === "ongoing";
+  return true;
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>(() => {
     return shouldReturnToOnline() ? { kind: "online" } : { kind: "main" };
@@ -65,7 +71,7 @@ export function App() {
 
   // The Resume button also covers the latest save when nothing is running.
   useEffect(() => {
-    if (screen.kind === "main" && !stateRef.current) {
+    if (screen.kind === "main") {
       latestSave().then((r) => setHasSavedGame(!!r), () => setHasSavedGame(false));
     }
   }, [screen.kind]);
@@ -130,7 +136,7 @@ export function App() {
 
   const resumeGame = useCallback(() => {
     const st = stateRef.current;
-    if (st && !isGameOver(st)) {
+    if (isResumableState(st)) {
       enterGameScreen(st);
       return;
     }
@@ -145,7 +151,7 @@ export function App() {
         <MainMenuScreen
           canResume={
             settings.showResumeButton &&
-            ((stateRef.current !== null && !isGameOver(stateRef.current)) || hasSavedGame)
+            (isResumableState(stateRef.current) || hasSavedGame)
           }
           onPlay={() => setScreen({ kind: "chooseMode" })}
           onResume={resumeGame}
@@ -179,7 +185,10 @@ export function App() {
         />
       );
     case "online":
-      return <OnlineScreen onBack={() => setScreen({ kind: "chooseMode" })} />;
+      return <OnlineScreen onBack={() => {
+        clearOnlineDeepLink();
+        setScreen({ kind: "chooseMode" });
+      }} />;
     case "settings":
       return <SettingsScreen onBack={() => setScreen({ kind: "main" })} />;
     case "about":
@@ -198,6 +207,7 @@ export function App() {
           configRef={configRef}
           forceRender={forceRender}
           initialReplay={loadedReplayRef.current}
+          onCampaignCompleted={() => setHasSavedGame(false)}
           onCampaignExit={() => setScreen({ kind: "campaign" })}
           onCampaignPlayLevel={startCampaignLevel}
           onMenu={() => setScreen({ kind: "main" })}
