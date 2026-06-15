@@ -117,10 +117,10 @@ function neighborAt(state: GameState, hex: HexTile, d: number): HexTile | null {
 
 /**
  * Edge index (into hexCorners) facing direction d, for pointy-top hexes:
- * the edge between corners k and k+1, where k = (6 - d) % 6.
+ * the edge between corners k and k+1, where k = (7 - d) % 6.
  */
 function edgeCorner(d: number): number {
-  return (6 - d) % 6;
+  return (7 - d) % 6;
 }
 
 // --- main entry --------------------------------------------------------------
