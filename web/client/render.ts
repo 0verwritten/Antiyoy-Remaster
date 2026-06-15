@@ -197,7 +197,7 @@ export function renderBoard(
       drawZoneMarker(ctx, hex, cam, rs.now);
     }
   }
-  if (rs.selectedHex >= 0 && state.hexes[rs.selectedHex]?.active) {
+  if (rs.protectionSource < 0 && rs.selectedHex >= 0 && state.hexes[rs.selectedHex]?.active) {
     drawSelection(ctx, state.hexes[rs.selectedHex], cam, rs.now);
   }
 }
@@ -210,26 +210,41 @@ function drawProtection(
 ) {
   const source = state.hexes[rs.protectionSource];
   if (!source?.active || !isDefensiveBuilding(source.obj)) return;
-  const protectedHexes: HexTile[] = [source];
-  for (const index of source.neighbors) {
-    const neighbor = state.hexes[index];
-    if (neighbor?.active && neighbor.fraction === source.fraction) protectedHexes.push(neighbor);
+  const province = state.provinces.find((candidate) => candidate.id === rs.highlightProvince);
+  if (!province) return;
+
+  const defensiveBuildings = province.hexes
+    .map((index) => state.hexes[index])
+    .filter((hex) => hex?.active && isDefensiveBuilding(hex.obj));
+  const protectedIndices = new Set<number>();
+  for (const building of defensiveBuildings) {
+    protectedIndices.add(building.index);
+    for (const index of building.neighbors) {
+      const neighbor = state.hexes[index];
+      if (neighbor?.active && neighbor.fraction === source.fraction) protectedIndices.add(index);
+    }
   }
 
-  for (const hex of protectedHexes) {
+  for (const index of protectedIndices) {
+    const hex = state.hexes[index];
     if (rs.fog && !rs.fog.has(hex.index)) continue;
     const { cx, cy, s } = tileScreen(hex, cam);
-    const size = Math.max(10, s * 0.48);
-    const x = cx + s * 0.25 - size / 2;
-    const y = cy - s * 0.3 - size / 2;
+    const size = Math.max(18, s * 1.05);
+    const x = cx - size / 2;
+    const y = cy - size / 2;
     ctx.save();
-    ctx.globalAlpha = 0.88;
+    ctx.globalAlpha = 0.72;
     if (defenseIconReady) {
       ctx.drawImage(defenseIcon, x, y, size, size);
     } else {
       drawShieldFallback(ctx, x, y, size);
     }
     ctx.restore();
+  }
+
+  for (const building of defensiveBuildings) {
+    if (rs.fog && !rs.fog.has(building.index)) continue;
+    drawSelection(ctx, building, cam, rs.now);
   }
 }
 
