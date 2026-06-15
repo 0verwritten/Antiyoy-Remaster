@@ -20,6 +20,7 @@ import { OnlineScreen } from "./screens/online";
 import { GameScreen } from "./screens/game";
 import { createCampaignLevelGame, ensureCampaignData, levelNeedsData } from "./game/campaign";
 import { setupPwa } from "./pwa";
+import { shouldReturnToOnline } from "./online-return";
 
 if (typeof window !== "undefined") setupPwa();
 
@@ -49,10 +50,7 @@ if (typeof document !== "undefined" && !document.querySelector("link[rel='icon']
 
 export function App() {
   const [screen, setScreen] = useState<Screen>(() => {
-    if (typeof location !== "undefined" && new URLSearchParams(location.search).get("screen") === "online") {
-      return { kind: "online" };
-    }
-    return { kind: "main" };
+    return shouldReturnToOnline() ? { kind: "online" } : { kind: "main" };
   });
   const stateRef = useRef<GameState | null>(null);
   const configRef = useRef<GameConfig | null>(null);

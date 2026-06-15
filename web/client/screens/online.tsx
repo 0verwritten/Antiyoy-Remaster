@@ -6,6 +6,7 @@ import { createGame } from "../game/engine";
 import { MENU_BACKGROUND_COLOR } from "../sprites";
 import { Chip, MenuButton } from "../ui/controls";
 import type { OnlineLobbyConfig, OnlineSnapshot } from "../../shared/online";
+import { clearOnlineAuthReturn, markOnlineAuthReturn } from "../online-return";
 import { GameScreen } from "./game";
 import type { Screen } from "./model";
 
@@ -44,6 +45,10 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (!auth.isLoading && !auth.isGuest) clearOnlineAuthReturn();
+  }, [auth.isLoading, auth.isGuest]);
+
   if (auth.isLoading) return <OnlineShell><p className="text-center font-bold text-[#2e2e28]">Checking session...</p></OnlineShell>;
 
   if (auth.isGuest) {
@@ -54,6 +59,7 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
           <p className="mb-4 font-semibold">Sign in to join persistent lobbies and play with other people.</p>
           <SignInWithGoogle
             returnTo="/?screen=online"
+            onClick={() => markOnlineAuthReturn()}
             className="min-h-[52px] rounded-2xl bg-[#f0eee3] px-6 text-lg font-bold shadow"
           />
         </div>
