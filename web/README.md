@@ -1,18 +1,31 @@
-# web
+# Antiyoy Web Remaster
 
-Run this Lakebed capsule:
+This directory contains the Lakebed capsule for the browser remaster.
+
+Run locally:
 
 ```sh
 npx lakebed dev
 ```
 
-The starter app includes two client routes:
-
-- `/`: the todo list.
-- `/status`: a page that calls the `GET /api/status` endpoint.
-
-You can also call the endpoint directly:
+Build the anonymous artifact:
 
 ```sh
-curl http://localhost:3000/api/status
+npx lakebed build . --target anonymous
 ```
+
+Run gameplay regression checks from the repository root:
+
+```sh
+cd devtools
+npm run sim
+```
+
+Deploy:
+
+```sh
+npx lakebed deploy
+```
+
+Do not commit generated `.lakebed/` output. The root `.gitignore` and this
+directory's `.gitignore` both ignore Lakebed build/cache directories.

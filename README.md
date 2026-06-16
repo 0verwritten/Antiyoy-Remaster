@@ -13,6 +13,30 @@
 > All credit for the original game and its design goes to [yiotro](https://github.com/yiotro).
 > Like the original, this is a non-commercial project.
 
+## Web Remaster Workflow
+
+The browser remaster lives in [`web/`](web/) and is built with Lakebed. Do not
+commit generated `.lakebed/` outputs.
+
+```sh
+cd web
+npx lakebed build . --target anonymous
+```
+
+Run the gameplay regression checks from the devtools package:
+
+```sh
+cd devtools
+npm run sim
+```
+
+For local browser testing:
+
+```sh
+cd web
+npx lakebed dev
+```
+
 ---
 
 # Antiyoy
@@ -69,5 +93,4 @@ To run in on android just do the same thing as with 'DekstopLauncher.java' but w
 If you want to make a mod, check out HD version. It has much better code quality. Link: https://github.com/yiotro/antiyoy_hd
 
 If you have some feedback about this game then please email me (yiotro93@gmail.com) about it.
-
 

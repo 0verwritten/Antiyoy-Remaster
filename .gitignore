@@ -4,3 +4,4 @@
 devtools/rotate-lakebed-token.mjs
 devtools/node_modules/
 devtools/package-lock.json
+.lakebed/

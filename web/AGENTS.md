@@ -37,11 +37,27 @@ Run locally:
 npx lakebed dev
 ```
 
+Build the anonymous artifact:
+
+```sh
+npx lakebed build . --target anonymous
+```
+
+Run gameplay regression checks from the repository root:
+
+```sh
+cd devtools
+npm run sim
+```
+
 Deploy:
 
 ```sh
 npx lakebed deploy
 ```
+
+Generated `.lakebed/` directories are build/cache output and must stay out of
+git. If a build regenerates them, leave them untracked.
 
 Inspect local state while `npx lakebed dev` is running:
 
