@@ -96,7 +96,7 @@ npx tsx devtools/mapgen-tests.ts
 npx tsx devtools/scenario-tests.ts
 npx tsx devtools/campaign-tests.ts
 npx tsx devtools/diplomacy-tests.ts   # to be written
-node devtools/check-bundle.mjs        # builds + 900 KB client budget gate
+node devtools/check-bundle.mjs        # builds + bundle-size report
 cd web && npx lakebed dev --port 3203
 node devtools/browser-check.mjs 3203  # or the production URL after deploy
 ```

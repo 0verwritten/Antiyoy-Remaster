@@ -1,6 +1,6 @@
 // Regenerates web/client/sprites.ts from the original game assets.
 // Packs only the frames the web renderer uses, at 80px ("_low" variants),
-// to keep the client bundle far below lakebed's 1 MB artifact limit.
+// to keep image bytes out of the client bundle.
 // Usage: node devtools/gen-sprites.mjs
 import { chromium } from "playwright-core";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -102,7 +102,7 @@ const out = `// Original Antiyoy sprites (from this repository's assets/, ant sk
 // (80px "_low" frames, only the ones the web renderer uses).
 //
 // The atlas and icons are hosted externally (jsDelivr -> this repo) rather
-// than embedded, to keep the client artifact under lakebed's 1 MB limit. The
+// than embedded, to keep image bytes out of the client artifact. The
 // atlas PNG is written to assets/web/atlas.png — commit it alongside this
 // file and deploy together so the CDN serves the matching layout.
 

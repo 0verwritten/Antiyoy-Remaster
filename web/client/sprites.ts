@@ -4,7 +4,7 @@
 // (80px "_low" frames, only the ones the web renderer uses).
 //
 // The atlas and icons are hosted externally (jsDelivr -> this repo) rather
-// than embedded, to keep the client artifact under lakebed's 1 MB limit. The
+// than embedded, to keep image bytes out of the client artifact. The
 // atlas PNG is written to assets/web/atlas.png — commit it alongside this
 // file and deploy together so the CDN serves the matching layout.
 

@@ -16,9 +16,8 @@ The two source documents agreed on the big points and conflicted on a few.
 Resolutions:
 
 1. **Bundle reduction and UI restructuring come first.** Both documents make
-   this a hard prerequisite. The deployed client bundle is close to Lakebed's
-   1 MB artifact limit; nothing data-heavy (campaign packs, diplomacy icons,
-   sound, skins) can land before this.
+   this a hard prerequisite. Nothing data-heavy (campaign packs, diplomacy
+   icons, sound, skins) can land before this.
 2. **Menus, skirmish, generator, settings, and saves come before campaign.**
    The legacy-features doc's stages 1-7 are smaller, independently shippable,
    and deliver the requested legacy menu/settings/mapgen experience without

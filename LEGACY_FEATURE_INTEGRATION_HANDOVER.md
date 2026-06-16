@@ -43,8 +43,7 @@ Do not discard or overwrite those changes when restructuring the UI.
    `skirmish`, `skirmishAdvanced`, `settings`, `game`, `load`, and `replays`.
 3. Add schema versions and migration functions for settings, saves, and replays.
 4. Reduce bundle size before adding sound or skins. The embedded atlas in
-   `web/client/sprites.ts` is the primary target. The Lakebed client artifact is
-   already close to its 1 MB limit.
+   `web/client/sprites.ts` is the primary target.
 5. Stabilize and commit the current replay work before persistence depends on it.
 
 ## Phase 1: Main Menu Parity

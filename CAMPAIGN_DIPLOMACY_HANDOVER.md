@@ -13,9 +13,8 @@ deployment constraints, and verification commands.
 - Neither feature is currently implemented in the web remaster.
 - The web game is fully client-side and currently supports generated Antiyoy
   and Slay games only.
-- The deployed client bundle is already close to Lakebed's 1 MB artifact limit.
-  Bundle reduction is a prerequisite for importing large campaign datasets or
-  diplomacy assets.
+- Keep the deployed client bundle small. Bundle reduction is a prerequisite for
+  importing large campaign datasets or diplomacy assets.
 
 Important legacy locations:
 
