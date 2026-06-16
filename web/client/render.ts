@@ -442,7 +442,7 @@ export function renderBoard(
     if (!hex.active) continue;
     if (rs.fog && !rs.fog.has(hex.index)) continue;
     const dim = rs.dimNonZone && !(rs.zone && rs.zone.has(hex.index));
-    drawContents(ctx, hex, cam, rs, dim);
+    drawContents(ctx, state, hex, cam, rs, dim);
   }
   // Fog overlay: darken active tiles the viewer cannot see.
   if (rs.fog) {
@@ -685,6 +685,7 @@ function drawSelection(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera,
 
 function drawContents(
   ctx: CanvasRenderingContext2D,
+  state: GameState,
   hex: HexTile,
   cam: Camera,
   rs: RenderState,
@@ -695,7 +696,7 @@ function drawContents(
   ctx.save();
   if (dim) ctx.globalAlpha = 0.4;
 
-  if (hex.obj !== "none") drawObject(ctx, hex, hex.obj, cx, cy, s);
+  if (hex.obj !== "none") drawObject(ctx, state, hex, hex.obj, cx, cy, s);
   if (hex.unit) drawUnit(ctx, hex, cx, cy, s, rs);
 
   ctx.restore();
@@ -703,6 +704,7 @@ function drawContents(
 
 function drawObject(
   ctx: CanvasRenderingContext2D,
+  state: GameState,
   hex: HexTile,
   obj: HexObj,
   cx: number,
@@ -720,8 +722,7 @@ function drawObject(
       else drawSprite(ctx, "palm", cx, cy, size);
       break;
     case "town":
-      // Province capital / main base — distinct castle sprite, not a house.
-      drawSprite(ctx, "castle", cx, cy, size);
+      drawSprite(ctx, state.config.mode === "slay" ? "house" : "castle", cx, cy, size);
       break;
     case "tower":
       if (night) drawLantern(ctx, cx, cy, s, night.lightRgb(hex.fraction), false);
