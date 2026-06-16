@@ -13,6 +13,7 @@ import {
   getMoveZone,
   getProvinceByHex,
   getProvinceProfit,
+  getRelation,
   getUnitPrice,
   isHumanTurn,
   isGameOver,
@@ -47,6 +48,7 @@ import { VictoryOverlay, CampaignOverlay } from "./victory";
 import { evaluateCampaign, CAMPAIGN_LEVEL_COUNT } from "../game/campaign";
 import { markLevelCompleted } from "../campaign-storage";
 import { ReplayViewer, type ReplayStep } from "./replay";
+import type { Action } from "../game/types";
 
 export interface GameScreenProps {
   screen: Screen;
@@ -108,6 +110,7 @@ export function GameScreen(props: GameScreenProps) {
   const [paused, setPaused] = useState<"none" | "menu" | "settings">("none");
   const [justSaved, setJustSaved] = useState(false);
   const [showOnlineChat, setShowOnlineChat] = useState(false);
+  const [showDiplomacy, setShowDiplomacy] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
 
   const [, setUi] = useState(0);
@@ -388,6 +391,21 @@ export function GameScreen(props: GameScreenProps) {
     refreshUi();
     if (!props.online) runAiIfNeeded();
   }, [stateRef, clearSelection, forceRender, refreshUi, runAiIfNeeded, props.online]);
+
+  const doDiplomacyAction = useCallback((action: Action) => {
+    const st = stateRef.current;
+    if (!st || aiThinkingRef.current || isGameOver(st) || !canControlTurn(st)) return;
+    pushUndo();
+    const result = applyAction(st, action);
+    if (!result.ok) {
+      undoRef.current.pop();
+      alert(result.reason ?? "Diplomacy action failed");
+      return;
+    }
+    clearSelection();
+    forceRender();
+    refreshUi();
+  }, [stateRef, canControlTurn, pushUndo, clearSelection, forceRender, refreshUi]);
 
   // Persist a replay record once when the game ends.
   useEffect(() => {
@@ -675,6 +693,19 @@ export function GameScreen(props: GameScreenProps) {
         </button>
       )}
 
+      {human && state.config.diplomacy && state.diplomacy && (
+        <button
+          type="button"
+          onClick={() => setShowDiplomacy((value) => !value)}
+          className={`absolute top-2 min-h-[40px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow ${
+            props.online ? "right-44" : "right-24"
+          }`}
+        >
+          Flags
+          {state.diplomacy.proposals.some((p) => p.to === state.turn) ? ` (${state.diplomacy.proposals.filter((p) => p.to === state.turn).length})` : ""}
+        </button>
+      )}
+
       <ZoomControls
         onZoomIn={() => zoomCamera(1.2)}
         onZoomOut={() => zoomCamera(1 / 1.2)}
@@ -759,6 +790,14 @@ export function GameScreen(props: GameScreenProps) {
           messages={props.online.messages}
           sendChat={props.online.sendChat}
           onClose={() => setShowOnlineChat(false)}
+        />
+      )}
+
+      {human && showDiplomacy && state.config.diplomacy && state.diplomacy && (
+        <DiplomacyPanel
+          state={state}
+          onAction={doDiplomacyAction}
+          onClose={() => setShowDiplomacy(false)}
         />
       )}
 
@@ -928,6 +967,140 @@ function OnlineChatPanel({ messages, sendChat, onClose }: {
         <input name="message" maxLength={300} className="min-w-0 flex-1 rounded-xl bg-[#f0eee3] px-3" placeholder="Message" />
         <button type="submit" className="rounded-xl bg-[#3a3a33] px-3 font-bold text-[#f0eee3]">Send</button>
       </form>
+    </div>
+  );
+}
+
+function DiplomacyPanel({
+  state,
+  onAction,
+  onClose,
+}: {
+  state: GameState;
+  onAction: (action: Action) => void;
+  onClose: () => void;
+}) {
+  const me = state.turn;
+  const diplomacy = state.diplomacy!;
+  const incoming = diplomacy.proposals.filter((p) => p.to === me);
+  const visibleLog = diplomacy.log
+    .filter((entry) => entry.from === me || entry.to === me)
+    .slice(-8)
+    .reverse();
+  const buttonCls = "min-h-[34px] rounded-xl bg-[#3a3a33] px-3 text-xs font-bold text-[#f0eee3] shadow active:translate-y-[1px]";
+  const ghostCls = "min-h-[34px] rounded-xl bg-[#f0eee3] px-3 text-xs font-bold text-[#3a3a33] shadow active:translate-y-[1px]";
+
+  function promptAmount(label: string): number | null {
+    const raw = prompt(label, "10");
+    if (raw === null) return null;
+    const value = Math.floor(Number(raw));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  return (
+    <div className="absolute bottom-24 right-4 z-10 flex max-h-[calc(100vh-8rem)] w-[min(28rem,calc(100vw-2rem))] flex-col rounded-2xl bg-[#b3ae7e] p-3 text-[#2e2e28] shadow-xl">
+      <div className="mb-2 flex items-center justify-between">
+        <strong>Diplomacy</strong>
+        <button type="button" onClick={onClose} className="px-2 font-black">X</button>
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+        <section className="space-y-2">
+          {state.alive.map((alive, fraction) => {
+            if (!alive || fraction === me) return null;
+            const relation = getRelation(state, me, fraction);
+            const color = displayFractionColor(state.config, fraction);
+            const blackMarked = diplomacy.blackMarks.includes(fraction);
+            return (
+              <div key={fraction} className="rounded-xl bg-[#e2dfc8] p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full ring-1 ring-black/30" style={{ background: color }} />
+                    <strong>{fractionLabel(state, fraction)}</strong>
+                  </div>
+                  <span className="rounded-full bg-[#f0eee3] px-2 py-1 text-xs font-bold uppercase">
+                    {blackMarked ? "black mark" : relation}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {relation !== "war" ? (
+                    <button type="button" className={buttonCls} onClick={() => onAction({ type: "declareWar", target: fraction })}>
+                      Declare war
+                    </button>
+                  ) : (
+                    <button type="button" className={ghostCls} onClick={() => onAction({ type: "proposeExchange", to: fraction, kind: "stopWar" })}>
+                      Offer peace
+                    </button>
+                  )}
+                  {relation !== "friend" && (
+                    <button type="button" className={ghostCls} onClick={() => onAction({ type: "proposeExchange", to: fraction, kind: "friendship" })}>
+                      Friendship
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={ghostCls}
+                    onClick={() => {
+                      const amount = promptAmount("Gift amount:");
+                      if (amount) onAction({ type: "proposeExchange", to: fraction, kind: "gift", amount });
+                    }}
+                  >
+                    Gift
+                  </button>
+                  <button
+                    type="button"
+                    className={ghostCls}
+                    onClick={() => {
+                      const amount = promptAmount("Subsidy per round:");
+                      if (amount) onAction({ type: "proposeExchange", to: fraction, kind: "subsidy", amount });
+                    }}
+                  >
+                    Subsidy
+                  </button>
+                  {!blackMarked && (
+                    <button type="button" className={`${buttonCls} col-span-2`} onClick={() => onAction({ type: "setBlackMark", target: fraction })}>
+                      Black mark
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
+        <section className="rounded-xl bg-[#e2dfc8] p-3">
+          <h3 className="mb-2 text-sm font-black">Inbox</h3>
+          {incoming.length === 0 ? (
+            <p className="text-sm font-bold opacity-60">No proposals.</p>
+          ) : incoming.map((proposal) => (
+            <div key={proposal.id} className="mb-2 rounded-lg bg-[#f0eee3] p-2 last:mb-0">
+              <p className="mb-2 text-sm font-bold">
+                {fractionLabel(state, proposal.from)} offers {proposal.kind}
+                {proposal.amount ? ` (${proposal.amount})` : ""}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className={buttonCls} onClick={() => onAction({ type: "acceptExchange", proposalId: proposal.id })}>
+                  Accept
+                </button>
+                <button type="button" className={ghostCls} onClick={() => onAction({ type: "rejectExchange", proposalId: proposal.id })}>
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section className="rounded-xl bg-[#e2dfc8] p-3">
+          <h3 className="mb-2 text-sm font-black">Log</h3>
+          {visibleLog.length === 0 ? (
+            <p className="text-sm font-bold opacity-60">No diplomatic events.</p>
+          ) : visibleLog.map((entry, index) => (
+            <p key={`${entry.round}-${entry.from}-${entry.to}-${index}`} className="mb-1 text-sm last:mb-0">
+              <strong>R{entry.round + 1}</strong> {fractionLabel(state, entry.from)} {entry.text} {fractionLabel(state, entry.to)}
+            </p>
+          ))}
+        </section>
+      </div>
     </div>
   );
 }

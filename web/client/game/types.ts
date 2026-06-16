@@ -51,7 +51,7 @@ export interface Province {
 
 export type MapSize = "small" | "medium" | "large" | "huge";
 
-export type Difficulty = "easy" | "normal" | "hard";
+export type Difficulty = "easy" | "normal" | "hard" | "expert" | "balancer" | "master";
 
 /**
  * "antiyoy": players start with one small province each and conquer the
@@ -85,9 +85,9 @@ export interface GameConfig {
    * rules are unchanged.
    */
   nightBattle?: boolean;
-  /** Not implemented yet — reserved so saved configs stay forward-compatible. */
+  /** Fog-of-war visibility for human/spectator rendering. */
   fogOfWar?: boolean;
-  /** Not implemented yet — reserved so saved configs stay forward-compatible. */
+  /** Enables neutral/friend/war relations, proposals, contracts and diplomatic victory. */
   diplomacy?: boolean;
 }
 

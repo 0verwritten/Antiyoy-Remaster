@@ -13,6 +13,7 @@ import {
   getMoveZone,
   getProvinceProfit,
   getProvincesOf,
+  getRelation,
   getUnitPrice,
 } from "./engine";
 import { MAX_UNIT_STRENGTH, NEUTRAL_FRACTION, PRICE_TOWER, UNIT_TAX } from "./constants";
@@ -33,6 +34,9 @@ const TUNINGS: Record<Difficulty, AiTuning> = {
   easy: { passes: 1, bufferTaxTurns: Infinity, repositioning: false, buildsTowers: false },
   normal: { passes: 2, bufferTaxTurns: 3, repositioning: true, buildsTowers: true },
   hard: { passes: 4, bufferTaxTurns: 2, repositioning: true, buildsTowers: true },
+  expert: { passes: 5, bufferTaxTurns: 1.5, repositioning: true, buildsTowers: true },
+  balancer: { passes: 3, bufferTaxTurns: 2.5, repositioning: true, buildsTowers: true },
+  master: { passes: 7, bufferTaxTurns: 1, repositioning: true, buildsTowers: true },
 };
 
 function tuning(state: GameState): AiTuning {
@@ -58,6 +62,8 @@ export function aiTakeTurn(state: GameState): void {
   // Safety cap so a logic bug can never hang the browser.
   let budget = 500;
 
+  handleDiplomacy(state, fraction);
+
   // Captures can merge/split provinces mid-turn, so sweep until quiet.
   for (let pass = 0; pass < tuning(state).passes && budget > 0; pass++) {
     const before = state.version;
@@ -72,6 +78,57 @@ export function aiTakeTurn(state: GameState): void {
   }
 
   applyAction(state, { type: "endTurn" });
+}
+
+function handleDiplomacy(state: GameState, fraction: number) {
+  const diplomacy = state.diplomacy;
+  if (!state.config.diplomacy || !diplomacy) return;
+
+  // Resolve inbox first. Gifts and subsidies are always useful. Friendship and
+  // peace are accepted only when there is no shared border, so the basic AI
+  // cannot lock itself out of necessary attacks.
+  const incoming = diplomacy.proposals.filter((proposal) => proposal.to === fraction);
+  for (const proposal of incoming) {
+    const peaceful =
+      proposal.kind === "gift" ||
+      proposal.kind === "subsidy" ||
+      !hasSharedBorder(state, fraction, proposal.from);
+    applyAction(state, {
+      type: peaceful ? "acceptExchange" : "rejectExchange",
+      proposalId: proposal.id,
+    });
+  }
+
+  // Diplomacy mode starts neutral, and neutral cannot be attacked. Declare war
+  // on adjacent non-friend survivors before the normal greedy move/buy logic.
+  const targets = borderingFractions(state, fraction);
+  for (const target of targets) {
+    if (getRelation(state, fraction, target) === "neutral") {
+      applyAction(state, { type: "declareWar", target });
+    }
+  }
+}
+
+function borderingFractions(state: GameState, fraction: number): number[] {
+  const seen = new Set<number>();
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction) continue;
+    for (const n of hex.neighbors) {
+      const other = state.hexes[n].fraction;
+      if (other !== fraction && other < NEUTRAL_FRACTION && state.alive[other]) seen.add(other);
+    }
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+function hasSharedBorder(state: GameState, a: number, b: number): boolean {
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== a) continue;
+    for (const n of hex.neighbors) {
+      if (state.hexes[n].fraction === b) return true;
+    }
+  }
+  return false;
 }
 
 function runProvince(state: GameState, provinceId: number, budget: number): number {

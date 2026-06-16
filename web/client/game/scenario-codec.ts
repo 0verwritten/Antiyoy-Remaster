@@ -52,11 +52,13 @@ function checkUnit(strength: number): number {
 }
 
 function difficultyFromCode(code: number): Difficulty {
-  // Legacy: 0 easy, 1 normal, 2 hard, 3+ expert/balancer/master — clamp to
-  // the three the web AI actually distinguishes.
+  // Legacy: 0 easy, 1 normal, 2 hard, 3 expert, 4 balancer, 5+ master.
   if (code <= 0) return "easy";
   if (code === 1) return "normal";
-  return "hard";
+  if (code === 2) return "hard";
+  if (code === 3) return "expert";
+  if (code === 4) return "balancer";
+  return "master";
 }
 
 /** Distinct colored fractions present, so playerCount reflects the real map. */

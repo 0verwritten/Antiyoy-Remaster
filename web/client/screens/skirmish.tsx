@@ -1,8 +1,8 @@
 // Skirmish setup screen: full legacy configuration (map size incl. huge,
 // players with per-size limits, difficulty, game mode, tree density,
 // starting provinces, preferred color, seed) persisted as the last-used
-// setup. Expert/Balancer/Master difficulties are NOT shown until they have
-// distinct AI behavior.
+// setup. The six legacy difficulty labels are exposed because each maps to a
+// distinct AI tuning.
 
 import { useState } from "preact/hooks";
 import {
@@ -48,6 +48,7 @@ export function SkirmishScreen({
       startingProvinces: normalized.startingProvinces,
       colorOffset: normalized.colorOffset,
       fogOfWar: normalized.fogOfWar,
+      diplomacy: normalized.diplomacy,
       nightBattle: normalized.nightBattle,
     });
   }
@@ -126,7 +127,7 @@ export function SkirmishScreen({
           <div>
             <label className={labelCls}>Difficulty</label>
             <div className="grid grid-cols-3 gap-2">
-              {(["easy", "normal", "hard"] as Difficulty[]).map((d) => (
+              {(["easy", "normal", "hard", "expert", "balancer", "master"] as Difficulty[]).map((d) => (
                 <Chip key={d} selected={setup.difficulty === d} onClick={() => update({ difficulty: d })}>
                   {d}
                 </Chip>
@@ -220,6 +221,19 @@ export function SkirmishScreen({
                 <div className="grid grid-cols-2 gap-2">
                   <Chip selected={setup.fogOfWar} onClick={() => update({ fogOfWar: true })}>On</Chip>
                   <Chip selected={!setup.fogOfWar} onClick={() => update({ fogOfWar: false })}>Off</Chip>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls}>
+                  Diplomacy{" "}
+                  <span className="font-normal opacity-60">
+                    {humanCount >= 2 ? "(declare war before attacks)" : "(basic AI support)"}
+                  </span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Chip selected={setup.diplomacy} onClick={() => update({ diplomacy: true })}>On</Chip>
+                  <Chip selected={!setup.diplomacy} onClick={() => update({ diplomacy: false })}>Off</Chip>
                 </div>
               </div>
 

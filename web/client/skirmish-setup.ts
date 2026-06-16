@@ -4,6 +4,8 @@
 import { maxPlayersForMapSize, TREES_PERCENTAGES } from "./game/constants";
 import type { Difficulty, GameMode, MapSize } from "./game/types";
 
+const DIFFICULTIES: Difficulty[] = ["easy", "normal", "hard", "expert", "balancer", "master"];
+
 export interface SkirmishSetup {
   mapSize: MapSize;
   playerCount: number;
@@ -14,6 +16,7 @@ export interface SkirmishSetup {
   startingProvinces: 0 | 1 | 2 | 3 | 4;
   colorOffset: number;
   fogOfWar: boolean;
+  diplomacy: boolean;
   nightBattle: boolean;
 }
 
@@ -30,6 +33,7 @@ export const DEFAULT_SETUP: SkirmishSetup = {
   startingProvinces: 0,
   colorOffset: 0,
   fogOfWar: false,
+  diplomacy: false,
   nightBattle: false,
 };
 
@@ -47,7 +51,7 @@ function migrate(raw: unknown): SkirmishSetup {
   if (typeof data.humanCount === "number") {
     out.humanCount = Math.min(Math.max(Math.round(data.humanCount), 0), out.playerCount);
   }
-  if (data.difficulty === "easy" || data.difficulty === "normal" || data.difficulty === "hard") {
+  if (data.difficulty && DIFFICULTIES.includes(data.difficulty)) {
     out.difficulty = data.difficulty;
   }
   if (data.mode === "antiyoy" || data.mode === "slay") out.mode = data.mode;
@@ -67,6 +71,7 @@ function migrate(raw: unknown): SkirmishSetup {
     out.colorOffset = Math.round(data.colorOffset);
   }
   if (typeof data.fogOfWar === "boolean") out.fogOfWar = data.fogOfWar;
+  if (typeof data.diplomacy === "boolean") out.diplomacy = data.diplomacy;
   if (typeof data.nightBattle === "boolean") out.nightBattle = data.nightBattle;
   return out;
 }
