@@ -78,6 +78,13 @@ export interface GameConfig {
   startingProvinces?: 0 | 1 | 2 | 3 | 4;
   /** Rotates the fraction palette so the first human gets the chosen color. */
   colorOffset?: number;
+  /**
+   * "Night Battle" visual mode: a black battlefield lit only by bases, houses
+   * and lanterns. Friendly (human) territory glows warm yellow; each enemy
+   * glows a distinct cold-to-warm white (4000K–7000K). Purely cosmetic — the
+   * rules are unchanged.
+   */
+  nightBattle?: boolean;
   /** Not implemented yet — reserved so saved configs stay forward-compatible. */
   fogOfWar?: boolean;
   /** Not implemented yet — reserved so saved configs stay forward-compatible. */

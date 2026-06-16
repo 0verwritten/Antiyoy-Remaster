@@ -14,6 +14,7 @@ export interface SkirmishSetup {
   startingProvinces: 0 | 1 | 2 | 3 | 4;
   colorOffset: number;
   fogOfWar: boolean;
+  nightBattle: boolean;
 }
 
 const KEY = "antiyoy.skirmish";
@@ -29,6 +30,7 @@ export const DEFAULT_SETUP: SkirmishSetup = {
   startingProvinces: 0,
   colorOffset: 0,
   fogOfWar: false,
+  nightBattle: false,
 };
 
 function migrate(raw: unknown): SkirmishSetup {
@@ -65,6 +67,7 @@ function migrate(raw: unknown): SkirmishSetup {
     out.colorOffset = Math.round(data.colorOffset);
   }
   if (typeof data.fogOfWar === "boolean") out.fogOfWar = data.fogOfWar;
+  if (typeof data.nightBattle === "boolean") out.nightBattle = data.nightBattle;
   return out;
 }
 

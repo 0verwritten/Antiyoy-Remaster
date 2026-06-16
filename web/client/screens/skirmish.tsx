@@ -48,6 +48,7 @@ export function SkirmishScreen({
       startingProvinces: normalized.startingProvinces,
       colorOffset: normalized.colorOffset,
       fogOfWar: normalized.fogOfWar,
+      nightBattle: normalized.nightBattle,
     });
   }
 
@@ -147,6 +148,17 @@ export function SkirmishScreen({
               <Chip selected={setup.mode === "slay"} onClick={() => update({ mode: "slay" })}>
                 Slay
               </Chip>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>
+              Night Battle{" "}
+              <span className="font-normal opacity-60">(dark map lit by lanterns)</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={setup.nightBattle} onClick={() => update({ nightBattle: true })}>On</Chip>
+              <Chip selected={!setup.nightBattle} onClick={() => update({ nightBattle: false })}>Off</Chip>
             </div>
           </div>
 
