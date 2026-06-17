@@ -997,6 +997,16 @@ function DiplomacyPanel({
     return Number.isFinite(value) && value > 0 ? value : null;
   }
 
+  function confirmDeclareWar(fraction: number) {
+    if (!confirm(`Declare war on ${fractionLabel(state, fraction)}?`)) return;
+    onAction({ type: "declareWar", target: fraction });
+  }
+
+  function confirmBlackMark(fraction: number) {
+    if (!confirm(`Black mark ${fractionLabel(state, fraction)}?`)) return;
+    onAction({ type: "setBlackMark", target: fraction });
+  }
+
   return (
     <div className="absolute bottom-24 right-4 z-10 flex max-h-[calc(100vh-8rem)] w-[min(28rem,calc(100vw-2rem))] flex-col rounded-2xl bg-[#b3ae7e] p-3 text-[#2e2e28] shadow-xl">
       <div className="mb-2 flex items-center justify-between">
@@ -1024,7 +1034,7 @@ function DiplomacyPanel({
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   {relation !== "war" ? (
-                    <button type="button" className={buttonCls} onClick={() => onAction({ type: "declareWar", target: fraction })}>
+                    <button type="button" className={buttonCls} onClick={() => confirmDeclareWar(fraction)}>
                       Declare war
                     </button>
                   ) : (
@@ -1058,7 +1068,7 @@ function DiplomacyPanel({
                     Subsidy
                   </button>
                   {!blackMarked && (
-                    <button type="button" className={`${buttonCls} col-span-2`} onClick={() => onAction({ type: "setBlackMark", target: fraction })}>
+                    <button type="button" className={`${buttonCls} col-span-2`} onClick={() => confirmBlackMark(fraction)}>
                       Black mark
                     </button>
                   )}
