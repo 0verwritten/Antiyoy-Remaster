@@ -358,10 +358,34 @@ function rebuildAllProvinces(state: GameState, init: boolean) {
 
 function handleDetachedTile(state: GameState, hex: HexTile) {
   if (hex.unit) {
-    hex.unit = null;
-    hex.obj = "grave";
+    markUnitForDeferredDeath(hex);
+    if (hex.obj === "town" || hex.obj === "tower" || hex.obj === "strongTower" || hex.obj === "farm") {
+      hex.obj = "none";
+    }
   } else if (hex.obj === "town" || hex.obj === "tower" || hex.obj === "strongTower" || hex.obj === "farm") {
     hex.obj = "none";
+  }
+}
+
+function markUnitForDeferredDeath(hex: HexTile) {
+  if (!hex.unit) return;
+  hex.unit.readyToMove = false;
+  hex.unit.deathPending = true;
+}
+
+function removeDeferredDeathsForTurn(state: GameState, fraction: Fraction) {
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction || !hex.unit?.deathPending) continue;
+    hex.unit = null;
+    if (hex.obj === "none") hex.obj = "grave";
+  }
+}
+
+function removeUnitsForEliminatedFraction(state: GameState, fraction: Fraction) {
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction || !hex.unit) continue;
+    hex.unit = null;
+    if (hex.obj === "none") hex.obj = "grave";
   }
 }
 
@@ -493,6 +517,7 @@ function canLandOn(hex: HexTile, strength: number): boolean {
   if (hex.obj === "town" || hex.obj === "tower" || hex.obj === "strongTower" || hex.obj === "farm") {
     return false;
   }
+  if (hex.unit?.deathPending) return false;
   if (hex.unit) return hex.unit.strength + strength <= MAX_UNIT_STRENGTH;
   return true; // empty, tree or grave (tree/grave get cleared)
 }
@@ -505,6 +530,7 @@ function canLandOn(hex: HexTile, strength: number): boolean {
 export function getMoveZone(state: GameState, from: number): number[] {
   const start = state.hexes[from];
   if (!start.unit || !start.unit.readyToMove) return [];
+  if (start.unit.deathPending) return [];
   const strength = start.unit.strength;
   const fraction = start.fraction;
   const dist = new Map<number, number>([[from, 0]]);
@@ -844,20 +870,20 @@ function beginTurn(state: GameState) {
       hex.obj = "pine";
       hex.treeBorn = state.round;
     }
-    // Units are refreshed.
+  }
+  removeDeferredDeathsForTurn(state, fraction);
+  for (const hex of state.hexes) {
+    if (!hex.active || hex.fraction !== fraction) continue;
+    // Units are refreshed after deferred deaths are cleared.
     if (hex.unit) hex.unit.readyToMove = true;
   }
   for (const province of getProvincesOf(state, fraction)) {
     province.money += getProvinceProfit(state, province);
     if (province.money < 0) {
-      // Bankruptcy: every unit in the province dies.
+      // Bankruptcy: every unit in the province dies on this fraction's next turn.
       province.money = 0;
       for (const h of province.hexes) {
-        const tile = state.hexes[h];
-        if (tile.unit) {
-          tile.unit = null;
-          if (tile.obj === "none") tile.obj = "grave";
-        }
+        markUnitForDeferredDeath(state.hexes[h]);
       }
     }
   }
@@ -890,6 +916,7 @@ function checkElimination(state: GameState) {
     if (!state.alive[p]) continue;
     if (getProvincesOf(state, p).length === 0) {
       state.alive[p] = false;
+      removeUnitsForEliminatedFraction(state, p);
       eliminated = true;
       onFractionEliminated(state, p); // scrub diplomacy (no-op without diplomacy)
     }

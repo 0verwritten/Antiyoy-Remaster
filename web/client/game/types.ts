@@ -20,6 +20,8 @@ export interface Unit {
   strength: number;
   /** True if the unit can still move this turn. */
   readyToMove: boolean;
+  /** Set when upkeep/cutoff has doomed the unit; removed on its owner's next turn. */
+  deathPending?: boolean;
 }
 
 export interface HexTile {

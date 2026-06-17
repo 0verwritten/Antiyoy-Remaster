@@ -98,6 +98,66 @@ for (const mode of ["antiyoy", "slay"] as const) {
   console.log("deferred victory: winner finalized on end turn");
 }
 
+// Detached units stay as doomed sprites until the owner starts their next turn.
+{
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 3 0 0 100#" +
+      "1 0 0 0 4 1 100#" +
+      "2 0 1 0 0 0 10#" +
+      "3 0 1 0 1 1 10#" +
+      "10 0 1 3 0 0 10#" +
+      "11 0 1 0 0 0 10",
+    "deferred-detached-death"
+  );
+  const st = createScenarioGame(scenario);
+  const attacker = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!;
+  const target = st.hexes.find((h) => h.active && h.q === 2 && h.r === 0)!;
+  const detached = st.hexes.find((h) => h.active && h.q === 3 && h.r === 0)!;
+  const capture = applyAction(st, { type: "moveUnit", from: attacker.index, to: target.index });
+  if (!capture.ok) throw new Error(`deferred detached death: capture failed: ${capture.reason}`);
+  if (!detached.unit?.deathPending) throw new Error("deferred detached death: unit died before owner turn");
+  if (detached.obj === "grave") throw new Error("deferred detached death: grave appeared before owner turn");
+  const endTurn = applyAction(st, { type: "endTurn" });
+  if (!endTurn.ok) throw new Error(`deferred detached death: end turn failed: ${endTurn.reason}`);
+  if (detached.unit || detached.obj !== "grave") {
+    throw new Error("deferred detached death: owner turn did not remove doomed unit");
+  }
+  console.log("deferred detached death: unit removed on owner turn");
+}
+
+// Bankruptcy leaves units visible but immobile for one owner turn, then removes them.
+{
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 3 0 0 100#" +
+      "1 0 0 0 4 1 100#" +
+      "5 0 1 3 0 0 10#" +
+      "6 0 1 0 0 0 10",
+    "deferred-bankruptcy-death"
+  );
+  const st = createScenarioGame(scenario);
+  const province = st.provinces.find((p) => p.fraction === 0)!;
+  const unitHex = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!;
+  province.money = -10;
+  const toPlayer1 = applyAction(st, { type: "endTurn" });
+  if (!toPlayer1.ok) throw new Error(`deferred bankruptcy death: first end turn failed: ${toPlayer1.reason}`);
+  const toPlayer0 = applyAction(st, { type: "endTurn" });
+  if (!toPlayer0.ok) throw new Error(`deferred bankruptcy death: second end turn failed: ${toPlayer0.reason}`);
+  if (!unitHex.unit?.deathPending) throw new Error("deferred bankruptcy death: unit died immediately");
+  if (unitHex.unit.readyToMove || getMoveZone(st, unitHex.index).length > 0) {
+    throw new Error("deferred bankruptcy death: doomed unit can still move");
+  }
+  const backToPlayer1 = applyAction(st, { type: "endTurn" });
+  if (!backToPlayer1.ok) throw new Error(`deferred bankruptcy death: third end turn failed: ${backToPlayer1.reason}`);
+  const backToPlayer0 = applyAction(st, { type: "endTurn" });
+  if (!backToPlayer0.ok) throw new Error(`deferred bankruptcy death: fourth end turn failed: ${backToPlayer0.reason}`);
+  if (unitHex.unit || unitHex.obj !== "grave") {
+    throw new Error("deferred bankruptcy death: next owner turn did not remove doomed unit");
+  }
+  console.log("deferred bankruptcy death: unit removed on next owner turn");
+}
+
 // Bought units are spent immediately: they cannot move or march until that
 // player's next turn, whether placed on owned land or used to capture.
 {
