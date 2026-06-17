@@ -82,6 +82,14 @@ function fractionColor(fraction: number): string {
   );
 }
 
+function paletteFractionColor(fraction: number): string {
+  if (fraction >= NEUTRAL_FRACTION || fraction < 0) return ORIGINAL_NEUTRAL_COLOR;
+  return (
+    ORIGINAL_FRACTION_COLORS[(fraction + paletteOffset) % ORIGINAL_FRACTION_COLORS.length] ??
+    ORIGINAL_NEUTRAL_COLOR
+  );
+}
+
 // --- Night Battle lighting ----------------------------------------------------
 // A dark, readable battlefield. Land keeps a flat, muted color so territories
 // stay distinguishable and clearly separate from the darker void background:
@@ -794,5 +802,64 @@ function drawUnit(
   if (!unit.readyToMove) {
     ctx.globalAlpha *= 0.8; // spent units rest, slightly faded
   }
-  drawSprite(ctx, "man" + (unit.strength - 1), cx, cy + bob, s * 1.35);
+  const y = cy + bob;
+  const sprite = "man" + (unit.strength - 1);
+  if (!atlasReady || !SPRITES[sprite]) return;
+  drawSprite(ctx, sprite, cx, y, s * 1.35);
+  drawUnitFactionMarker(ctx, hex.fraction, cx, y, s);
+}
+
+function drawUnitFactionMarker(
+  ctx: CanvasRenderingContext2D,
+  fraction: number,
+  cx: number,
+  cy: number,
+  s: number
+) {
+  const r = Math.max(2.6, s * 0.12);
+  const x = cx + s * 0.16;
+  const y = cy - s * 0.05;
+  const fill = paletteFractionColor(fraction);
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.lineJoin = "round";
+
+  if (night) {
+    ctx.shadowColor = rgbStr(night.lightRgb(fraction));
+    ctx.shadowBlur = Math.max(3, s * 0.12);
+  }
+
+  ctx.beginPath();
+  unitMarkerPath(ctx, r);
+  ctx.fillStyle = "rgba(8,10,14,0.86)";
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(1, s * 0.032);
+  ctx.strokeStyle = night ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.72)";
+  ctx.stroke();
+
+  ctx.beginPath();
+  unitMarkerPath(ctx, r * 0.66);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.lineWidth = Math.max(0.8, s * 0.018);
+  ctx.strokeStyle = shade(fill, -0.42);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(-r * 0.18, -r * 0.22, r * 0.18, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  ctx.fill();
+  ctx.restore();
+}
+
+function unitMarkerPath(ctx: CanvasRenderingContext2D, r: number) {
+  ctx.moveTo(0, -r * 1.05);
+  ctx.lineTo(r * 0.9, -r * 0.58);
+  ctx.lineTo(r * 0.72, r * 0.42);
+  ctx.quadraticCurveTo(r * 0.58, r * 0.86, 0, r * 1.1);
+  ctx.quadraticCurveTo(-r * 0.58, r * 0.86, -r * 0.72, r * 0.42);
+  ctx.lineTo(-r * 0.9, -r * 0.58);
+  ctx.closePath();
 }
