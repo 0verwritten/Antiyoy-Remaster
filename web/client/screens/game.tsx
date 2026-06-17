@@ -150,6 +150,12 @@ export function GameScreen(props: GameScreenProps) {
   const fittedRef = useRef(false);
   // Fog visibility cache (recomputed only when the state version or viewer changes).
   const fogCacheRef = useRef<{ version: number; viewer: number; set: Set<number> } | null>(null);
+  const actionIndicatorCacheRef = useRef<{
+    version: number;
+    turn: number;
+    enabled: boolean;
+    capitals: Set<number> | null;
+  } | null>(null);
 
   // Track unmount so a pending AI chain stops with the screen.
   useEffect(() => {
@@ -191,12 +197,14 @@ export function GameScreen(props: GameScreenProps) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const pending = pendingRef.current;
+      const showActionIndicators = canControlTurn(st) && !aiThinkingRef.current && !isGameOver(st);
       const rs: RenderState = buildRenderState(
         st,
         pending,
         selectedHexRef.current,
         highlightProvinceRef.current,
-        protectionSourceRef.current
+        protectionSourceRef.current,
+        getActionIndicatorCapitals(st, showActionIndicators, actionIndicatorCacheRef)
       );
       rs.fog = computeFog(st, fogCacheRef);
       // Always redraw (animations + simplicity).
@@ -1322,7 +1330,8 @@ function buildRenderState(
   pending: Pending,
   selectedHex: number,
   highlightProvince: number,
-  protectionSource: number
+  protectionSource: number,
+  actionIndicatorCapitals: Set<number> | null
 ): RenderState {
   let zone: Set<number> | null = null;
   let dim = false;
@@ -1350,9 +1359,68 @@ function buildRenderState(
     dimNonZone: dim,
     now: performance.now(),
     activeFraction: state.turn,
+    actionIndicatorCapitals,
   };
 }
 
 function isDefensiveBuilding(obj: GameState["hexes"][number]["obj"]): boolean {
   return obj === "town" || obj === "tower" || obj === "strongTower";
+}
+
+function getActionIndicatorCapitals(
+  state: GameState,
+  enabled: boolean,
+  cache: {
+    current: { version: number; turn: number; enabled: boolean; capitals: Set<number> | null } | null;
+  }
+): Set<number> | null {
+  const c = cache.current;
+  if (c && c.version === state.version && c.turn === state.turn && c.enabled === enabled) {
+    return c.capitals;
+  }
+
+  if (!enabled) {
+    cache.current = { version: state.version, turn: state.turn, enabled, capitals: null };
+    return null;
+  }
+
+  const capitals = new Set<number>();
+  for (const province of state.provinces) {
+    if (province.fraction !== state.turn || province.capital < 0) continue;
+    if (provinceHasAction(state, province)) capitals.add(province.capital);
+  }
+  cache.current = {
+    version: state.version,
+    turn: state.turn,
+    enabled,
+    capitals: capitals.size > 0 ? capitals : null,
+  };
+  return cache.current.capitals;
+}
+
+function provinceHasAction(state: GameState, province: Province): boolean {
+  for (const hexIndex of province.hexes) {
+    const unit = state.hexes[hexIndex]?.unit;
+    if (unit?.readyToMove && getMoveZone(state, hexIndex).length > 0) return true;
+  }
+
+  for (const strength of [1, 2, 3, 4]) {
+    if (province.money >= getUnitPrice(strength) && getBuyZone(state, province, strength).length > 0) {
+      return true;
+    }
+  }
+
+  const farmPrice = getFarmPrice(state, province);
+  const buildOptions = [
+    { kind: "farm" as const, price: farmPrice },
+    { kind: "tower" as const, price: PRICE_TOWER },
+    { kind: "strongTower" as const, price: PRICE_STRONG_TOWER },
+  ];
+  for (const option of buildOptions) {
+    if (province.money >= option.price && getBuildZone(state, province, option.kind).length > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }

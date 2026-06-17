@@ -12,6 +12,7 @@ import {
   ORIGINAL_FRACTION_COLORS,
   ORIGINAL_NEUTRAL_COLOR,
   ICON_DEFENSE_URL,
+  ICON_EXCLAMATION_URL,
   SPRITES,
   WATER_COLOR,
 } from "./sprites";
@@ -33,6 +34,8 @@ export interface RenderState {
   activeFraction: Fraction;
   /** Fog of war: indices the viewer can see. null = no fog (see everything). */
   fog?: Set<number> | null;
+  /** Capital hexes for provinces that still have legal human-turn actions. */
+  actionIndicatorCapitals?: Set<number> | null;
 }
 
 // --- sprite atlas ------------------------------------------------------------
@@ -55,6 +58,14 @@ defenseIcon.onload = () => {
 };
 defenseIcon.crossOrigin = "anonymous";
 defenseIcon.src = ICON_DEFENSE_URL;
+
+const exclamationIcon = new Image();
+let exclamationIconReady = false;
+exclamationIcon.onload = () => {
+  exclamationIconReady = true;
+};
+exclamationIcon.crossOrigin = "anonymous";
+exclamationIcon.src = ICON_EXCLAMATION_URL;
 
 function drawSprite(
   ctx: CanvasRenderingContext2D,
@@ -483,6 +494,9 @@ export function renderBoard(
     const dim = rs.dimNonZone && !(rs.zone && rs.zone.has(hex.index));
     drawContents(ctx, state, hex, cam, rs, dim);
   }
+  if (rs.actionIndicatorCapitals) {
+    drawActionIndicators(ctx, state, cam, rs);
+  }
   // Fog overlay: darken active tiles the viewer cannot see.
   if (rs.fog) {
     ctx.fillStyle = "rgba(20,26,38,0.62)";
@@ -570,6 +584,55 @@ function drawShieldFallback(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.quadraticCurveTo(x + size * 0.32, y + size * 0.82, x + size * 0.24, y + size * 0.62);
   ctx.lineTo(x + size * 0.18, y + size * 0.22);
   ctx.closePath();
+  ctx.fill();
+}
+
+function drawActionIndicators(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  cam: Camera,
+  rs: RenderState
+) {
+  if (!rs.actionIndicatorCapitals || rs.actionIndicatorCapitals.size === 0) return;
+  for (const idx of rs.actionIndicatorCapitals) {
+    const hex = state.hexes[idx];
+    if (!hex?.active || hex.obj !== "town") continue;
+    if (rs.fog && !rs.fog.has(hex.index)) continue;
+    const { cx, cy, s } = tileScreen(hex, cam);
+    const size = Math.max(14, Math.min(30, s * 0.7));
+    const pulse = 0.92 + 0.08 * (0.5 + 0.5 * Math.sin(rs.now / 260 + hex.index));
+    const x = cx + s * 0.26;
+    const y = cy - s * 0.62;
+    ctx.save();
+    ctx.globalAlpha *= pulse;
+    if (exclamationIconReady) {
+      ctx.drawImage(exclamationIcon, x - size / 2, y - size / 2, size, size);
+    } else {
+      drawExclamationFallback(ctx, x, y, size);
+    }
+    ctx.restore();
+  }
+}
+
+function drawExclamationFallback(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+  ctx.fillStyle = "rgba(255,232,74,0.95)";
+  ctx.strokeStyle = "rgba(58,58,51,0.85)";
+  ctx.lineWidth = Math.max(1.5, size * 0.09);
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(58,58,51,0.95)";
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(2, size * 0.14);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - size * 0.18);
+  ctx.lineTo(cx, cy + size * 0.08);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(58,58,51,0.95)";
+  ctx.beginPath();
+  ctx.arc(cx, cy + size * 0.24, Math.max(1.2, size * 0.07), 0, Math.PI * 2);
   ctx.fill();
 }
 
