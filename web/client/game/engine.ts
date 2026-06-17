@@ -689,8 +689,8 @@ function doBuyUnit(state: GameState, provinceId: number, strength: number, targe
   const isCapture = target.fraction !== province.fraction;
   province.money -= price;
   if (isCapture) target.unit = null; // the defender dies, never merges
-  // Fresh units may still move when placed on own land; attacking spends them.
-  placeUnitOnHex(state, target, strength, !isCapture, province);
+  // Freshly bought units are spent immediately, including friendly merges.
+  placeUnitOnHex(state, target, strength, false, province);
   if (isCapture) {
     captureHex(state, target, province.fraction);
   }

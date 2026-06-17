@@ -1,6 +1,6 @@
 // Headless engine/AI verification: runs AI-vs-AI games in both modes and
 // checks invariants. Run from repo root: npx tsx devtools/sim.ts
-import { applyAction, computeVisibility, createGame, createScenarioGame, getBuyZone, marchUnitsToHex, setActionObserver } from "../web/client/game/engine";
+import { applyAction, computeVisibility, createGame, createScenarioGame, getMoveZone, setActionObserver } from "../web/client/game/engine";
 import { parseLevelString } from "../web/client/game/scenario-codec";
 import { aiTakeTurn } from "../web/client/game/ai";
 import { NEUTRAL_FRACTION } from "../web/client/game/constants";
@@ -98,27 +98,46 @@ for (const mode of ["antiyoy", "slay"] as const) {
   console.log("deferred victory: winner finalized on end turn");
 }
 
-// Hold-to-march: a bought unit walks to the marched-to tile through own land.
+// Bought units are spent immediately: they cannot move or march until that
+// player's next turn, whether placed on owned land or used to capture.
 {
-  const st = createGame({ mapSize: "medium", playerCount: 2, humanCount: 2, seed: 777, mode: "slay" });
-  // Pick a province big enough to hold a unit, a destination and the capital.
-  const prov = st.provinces.find((p) => {
-    if (p.fraction !== 0 || p.hexes.length < 4) return false;
-    return getBuyZone(st, { ...p, money: 100 }, 1).some((h) => p.hexes.includes(h));
-  })!;
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 3 0 0 100#" +
+      "1 0 0 0 0 0 10#" +
+      "2 0 0 0 0 0 10#" +
+      "3 0 1 0 0 0 10#" +
+      "4 0 1 3 0 0 10#" +
+      "5 0 1 0 0 0 10",
+    "bought-units-spent"
+  );
+  const st = createScenarioGame(scenario);
+  const prov = st.provinces.find((p) => p.fraction === 0)!;
   prov.money = 100;
-  const spot = getBuyZone(st, prov, 1).find((h) => prov.hexes.includes(h))!;
+  const spot = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!.index;
   const buy = applyAction(st, { type: "buyUnit", provinceId: prov.id, strength: 1, target: spot });
-  if (!buy.ok) throw new Error(`march test: buy failed: ${buy.reason}`);
-  const provAfter = st.provinces.find((p) => p.id === prov.id)!;
-  const dest = provAfter.hexes.find(
-    (h) => h !== spot && !st.hexes[h].unit && st.hexes[h].obj !== "town"
-  )!;
-  const moves = marchUnitsToHex(st, provAfter, dest);
-  if (moves < 1) throw new Error("march test: no unit moved");
-  if (!st.hexes[dest].unit) throw new Error("march test: unit did not reach the target tile");
-  check(st, "march");
-  console.log(`march: ${moves} unit(s) marched to target`);
+  if (!buy.ok) throw new Error(`bought spent test: buy failed: ${buy.reason}`);
+  if (st.hexes[spot].unit?.readyToMove) throw new Error("bought spent test: own-land unit is ready");
+  if (getMoveZone(st, spot).length !== 0) throw new Error("bought spent test: own-land unit has a move zone");
+  const dest = st.hexes.find((h) => h.active && h.q === 2 && h.r === 0)!.index;
+  const immediateMove = applyAction(st, { type: "moveUnit", from: spot, to: dest });
+  if (immediateMove.ok) throw new Error("bought spent test: own-land unit moved immediately");
+
+  const enemy = st.hexes.find((h) => h.active && h.q === 3 && h.r === 0)!.index;
+  const capture = applyAction(st, { type: "buyUnit", provinceId: prov.id, strength: 4, target: enemy });
+  if (!capture.ok) throw new Error(`bought spent test: capture buy failed: ${capture.reason}`);
+  if (st.hexes[enemy].unit?.readyToMove) throw new Error("bought spent test: capture unit is ready");
+  if (getMoveZone(st, enemy).length !== 0) throw new Error("bought spent test: capture unit has a move zone");
+
+  const end0 = applyAction(st, { type: "endTurn" });
+  if (!end0.ok) throw new Error(`bought spent test: player 0 end failed: ${end0.reason}`);
+  const end1 = applyAction(st, { type: "endTurn" });
+  if (!end1.ok) throw new Error(`bought spent test: player 1 end failed: ${end1.reason}`);
+  if (!st.hexes[spot].unit?.readyToMove || !st.hexes[enemy].unit?.readyToMove) {
+    throw new Error("bought spent test: bought units were not refreshed next turn");
+  }
+  check(st, "bought-spent");
+  console.log("bought spent: units wait until next turn");
 }
 
 // Merging two unmoved units preserves the destination unit's unused move.
