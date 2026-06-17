@@ -184,7 +184,7 @@ function drawLantern(
   cy: number,
   s: number,
   rgb: [number, number, number],
-  _strong: boolean
+  strong: boolean
 ) {
   const col = rgbStr(rgb);
 
@@ -199,9 +199,19 @@ function drawLantern(
   ctx.moveTo(0, u * 0.95);
   ctx.lineTo(0, u * 0.12);
   ctx.stroke();
+  if (strong) {
+    // Strong lanterns keep the same shape language, but get a reinforced frame.
+    ctx.lineWidth = Math.max(1, u * 0.08);
+    ctx.beginPath();
+    ctx.moveTo(-u * 0.22, u * 0.88);
+    ctx.lineTo(-u * 0.22, -u * 0.05);
+    ctx.moveTo(u * 0.22, u * 0.88);
+    ctx.lineTo(u * 0.22, -u * 0.05);
+    ctx.stroke();
+  }
   // Glowing hex bulb.
-  const bw = u * 0.5;
-  const bh = u * 0.72;
+  const bw = u * (strong ? 0.62 : 0.5);
+  const bh = u * (strong ? 0.82 : 0.72);
   ctx.beginPath();
   ctx.moveTo(0, -bh * 0.95);
   ctx.lineTo(bw, -bh * 0.32);
@@ -215,11 +225,32 @@ function drawLantern(
   ctx.shadowBlur = s * 0.5;
   ctx.fill();
   ctx.shadowBlur = 0;
+  if (strong) {
+    ctx.strokeStyle = "rgba(14,15,20,0.7)";
+    ctx.lineWidth = Math.max(1, u * 0.08);
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-bw * 0.7, -bh * 0.62);
+    ctx.lineTo(bw * 0.7, -bh * 0.62);
+    ctx.moveTo(-bw * 0.68, bh * 0.34);
+    ctx.lineTo(bw * 0.68, bh * 0.34);
+    ctx.stroke();
+  }
   // Bright core.
   ctx.fillStyle = "rgba(255,255,255,0.85)";
   ctx.beginPath();
   ctx.ellipse(0, -bh * 0.05, bw * 0.42, bh * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
+  if (strong) {
+    ctx.fillStyle = col;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = s * 0.28;
+    ctx.beginPath();
+    ctx.ellipse(0, bh * 0.68, bw * 0.26, bh * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
   // Minimal dark frame.
   ctx.strokeStyle = "rgba(14,15,20,0.5)";
   ctx.lineWidth = Math.max(1, u * 0.07);
