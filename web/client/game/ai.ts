@@ -264,9 +264,69 @@ function buyOneUnit(state: GameState, province: Province): boolean {
   return false;
 }
 
-/** Spend surplus on farms (economy) and the odd tower (defense). */
+function towerReserve(state: GameState, province: Province): number {
+  const profitAfterTower = getProvinceProfit(state, province) - 1;
+  const deficitReserve = Math.max(0, -profitAfterTower) * tuning(state).bufferTaxTurns;
+  const existingTowers = province.hexes.filter((h) => state.hexes[h].obj === "tower").length;
+  return Math.ceil(Math.max(8, deficitReserve) + existingTowers * 12);
+}
+
+function borderThreatScore(state: GameState, province: Province, tile: HexTile): number {
+  let enemy = 0;
+  let neutral = 0;
+  for (const n of tile.neighbors) {
+    const neighbor = state.hexes[n];
+    if (!neighbor.active || neighbor.fraction === province.fraction) continue;
+    if (neighbor.fraction === NEUTRAL_FRACTION) neutral++;
+    else enemy++;
+  }
+  if (enemy === 0 && neutral === 0) return 0;
+
+  let score = enemy > 0 ? 4 + enemy * 2 : 1;
+  if (tile.obj === "town") score += 5;
+  if (tile.obj === "farm") score += 3;
+  if (tile.unit) score += tile.unit.strength;
+  return score;
+}
+
+function buildDefensiveTower(state: GameState, province: Province): boolean {
+  if (!tuning(state).buildsTowers || province.hexes.length < 8) return false;
+
+  const reserve = towerReserve(state, province);
+  if (province.money < PRICE_TOWER + reserve) return false;
+
+  const spots = getBuildZone(state, province, "tower");
+  let best = -1;
+  let bestScore = 9; // require more than one lightly exposed neutral edge
+  for (const idx of spots) {
+    const covered = [idx, ...state.hexes[idx].neighbors];
+    let score = 0;
+    for (const coveredIdx of covered) {
+      const tile = state.hexes[coveredIdx];
+      if (!tile.active || tile.fraction !== province.fraction) continue;
+      if (getDefenseNumber(state, tile) >= 2) continue;
+      score += borderThreatScore(state, province, tile);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = idx;
+    }
+  }
+  if (best < 0) return false;
+
+  const r = applyAction(state, {
+    type: "build",
+    kind: "tower",
+    provinceId: province.id,
+    target: best,
+  });
+  return r.ok;
+}
+
+/** Spend surplus on defense and farms. */
 function buildSomething(state: GameState, province: Province): boolean {
-  const allowTowers = tuning(state).buildsTowers;
+  if (buildDefensiveTower(state, province)) return true;
+
   // Farms: strong long-term value, buy whenever comfortably affordable.
   const farmPrice = getFarmPrice(state, province);
   if (province.money >= farmPrice + 10) {
@@ -277,35 +337,6 @@ function buildSomething(state: GameState, province: Province): boolean {
         kind: "farm",
         provinceId: province.id,
         target: spots[0],
-      });
-      if (r.ok) return true;
-    }
-  }
-  // Tower: place where it covers the most undefended border tiles.
-  if (allowTowers && province.money >= PRICE_TOWER + 20 && province.hexes.length >= 8) {
-    const spots = getBuildZone(state, province, "tower");
-    let best = -1;
-    let bestCover = 2; // require covering at least 3 weak tiles to bother
-    for (const idx of spots) {
-      const tile = state.hexes[idx];
-      let cover = 0;
-      for (const n of tile.neighbors) {
-        const neighbor = state.hexes[n];
-        if (!neighbor.active || neighbor.fraction !== province.fraction) continue;
-        if (getDefenseNumber(state, neighbor) < 2) cover++;
-      }
-      if (getDefenseNumber(state, tile) < 2) cover++;
-      if (cover > bestCover) {
-        bestCover = cover;
-        best = idx;
-      }
-    }
-    if (best >= 0) {
-      const r = applyAction(state, {
-        type: "build",
-        kind: "tower",
-        provinceId: province.id,
-        target: best,
       });
       if (r.ok) return true;
     }

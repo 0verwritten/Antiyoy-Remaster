@@ -224,6 +224,36 @@ for (const mode of ["antiyoy", "slay"] as const) {
   console.log("ready merge: merged unit retained its move");
 }
 
+// Normal+ AI should spend a healthy treasury on practical border defense
+// when the frontier is exposed and buying a capture is not viable.
+{
+  const scenario = parseLevelString(
+    "1 1 2 7/" +
+      "0 0 0 3 0 0 25#" +
+      "1 0 0 0 0 0 10#" +
+      "2 0 0 0 0 0 10#" +
+      "0 1 0 0 0 0 10#" +
+      "1 1 0 0 0 0 10#" +
+      "2 1 0 0 0 0 10#" +
+      "0 2 0 0 0 0 10#" +
+      "1 2 0 0 0 0 10#" +
+      "2 2 0 0 0 0 10#" +
+      "3 0 1 7 0 0 10#" +
+      "3 1 1 7 0 0 10#" +
+      "3 2 1 7 0 0 10",
+    "ai-border-defense"
+  );
+  const st = createScenarioGame(scenario);
+  const actions: Action[] = [];
+  setActionObserver(st, (event) => actions.push(event.action));
+  aiTakeTurn(st);
+  const towerBuild = actions.find((action) => action.type === "build" && action.kind === "tower");
+  if (!towerBuild) throw new Error("ai defense: normal AI did not build a tower on an exposed border");
+  const province = st.provinces.find((p) => p.fraction === 0)!;
+  if (province.money < 0) throw new Error("ai defense: tower spending bankrupted the province");
+  console.log(`ai defense: built tower at hex ${towerBuild.target} with ${province.money} gold left`);
+}
+
 // Fog of war: the viewer sees their own land; some enemy/far land is hidden;
 // a tower reveals strictly more than a bare hex.
 {
