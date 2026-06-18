@@ -827,14 +827,13 @@ function drawBorders(
 
 function drawZoneMarker(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera, now: number) {
   const { cx, cy, s } = tileScreen(hex, cam);
-  // Blinking white overlay like the original move-zone animation.
+  // Blinking fill like the original move-zone animation. Do not stroke this
+  // path: it sits exactly on territory borders and would repaint some edges
+  // white depending on the order in which adjacent targets are drawn.
   const pulse = 0.14 + 0.1 * (0.5 + 0.5 * Math.sin(now / 280));
   hexPath(ctx, cx, cy, s);
   ctx.fillStyle = `rgba(255,255,255,${pulse.toFixed(3)})`;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, s * 0.07);
-  ctx.strokeStyle = "rgba(255,255,255,0.8)";
-  ctx.stroke();
 }
 
 function drawSelection(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera, now: number) {

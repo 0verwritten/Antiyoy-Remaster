@@ -14,6 +14,9 @@ import { MENU_BACKGROUND_COLOR, ORIGINAL_FRACTION_COLORS } from "../sprites";
 import { Chip, MenuButton } from "../ui/controls";
 import { loadSkirmishSetup, saveSkirmishSetup, type SkirmishSetup } from "../skirmish-setup";
 
+const MAP_SIZES: MapSize[] = ["small", "medium", "large", "huge"];
+const DIFFICULTIES: Difficulty[] = ["easy", "normal", "hard", "expert", "balancer", "master"];
+
 export function SkirmishScreen({
   onPlay,
   onBack,
@@ -55,6 +58,8 @@ export function SkirmishScreen({
 
   const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
   const treeIndex = Math.max(0, TREES_PERCENTAGES.indexOf(setup.treePercentage));
+  const mapSizeIndex = Math.max(0, MAP_SIZES.indexOf(setup.mapSize));
+  const difficultyIndex = Math.max(0, DIFFICULTIES.indexOf(setup.difficulty));
 
   return (
     <main
@@ -70,13 +75,20 @@ export function SkirmishScreen({
 
         <section className="flex flex-col gap-5 rounded-3xl bg-[#b3ae7e] p-5 shadow-[0_4px_0_rgba(0,0,0,0.2)]">
           <div>
-            <label className={labelCls}>Map size</label>
-            <div className="grid grid-cols-4 gap-2">
-              {(["small", "medium", "large", "huge"] as MapSize[]).map((m) => (
-                <Chip key={m} selected={setup.mapSize === m} onClick={() => update({ mapSize: m })}>
-                  {m}
-                </Chip>
-              ))}
+            <label className={labelCls}>Map size: {setup.mapSize}</label>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-[#2e2e28]/60">small</span>
+              <input
+                type="range"
+                min="0"
+                max={MAP_SIZES.length - 1}
+                step="1"
+                value={mapSizeIndex}
+                aria-label="Map size"
+                onInput={(event) => update({ mapSize: MAP_SIZES[Number(event.currentTarget.value)] })}
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#3a3a33]"
+              />
+              <span className="text-xs font-bold text-[#2e2e28]/60">huge</span>
             </div>
           </div>
 
@@ -125,13 +137,20 @@ export function SkirmishScreen({
           </div>
 
           <div>
-            <label className={labelCls}>Difficulty</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["easy", "normal", "hard", "expert", "balancer", "master"] as Difficulty[]).map((d) => (
-                <Chip key={d} selected={setup.difficulty === d} onClick={() => update({ difficulty: d })}>
-                  {d}
-                </Chip>
-              ))}
+            <label className={labelCls}>Difficulty: {setup.difficulty}</label>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-[#2e2e28]/60">easy</span>
+              <input
+                type="range"
+                min="0"
+                max={DIFFICULTIES.length - 1}
+                step="1"
+                value={difficultyIndex}
+                aria-label="Difficulty"
+                onInput={(event) => update({ difficulty: DIFFICULTIES[Number(event.currentTarget.value)] })}
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#3a3a33]"
+              />
+              <span className="text-xs font-bold text-[#2e2e28]/60">master</span>
             </div>
           </div>
 
@@ -155,6 +174,9 @@ export function SkirmishScreen({
           <div>
             <label className={labelCls}>
               Night Battle{" "}
+              <span className="mr-1 inline-block rounded bg-[#a3322a] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                Beta
+              </span>{" "}
               <span className="font-normal opacity-60">(dark map lit by lanterns)</span>
             </label>
             <div className="grid grid-cols-2 gap-2">
