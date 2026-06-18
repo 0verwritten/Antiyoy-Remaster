@@ -59,7 +59,6 @@ export function SkirmishScreen({
   const labelCls = "mb-2 block text-sm font-bold text-[#2e2e28]";
   const treeIndex = Math.max(0, TREES_PERCENTAGES.indexOf(setup.treePercentage));
   const mapSizeIndex = Math.max(0, MAP_SIZES.indexOf(setup.mapSize));
-  const difficultyIndex = Math.max(0, DIFFICULTIES.indexOf(setup.difficulty));
 
   return (
     <main
@@ -137,20 +136,17 @@ export function SkirmishScreen({
           </div>
 
           <div>
-            <label className={labelCls}>Difficulty: {setup.difficulty}</label>
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-[#2e2e28]/60">easy</span>
-              <input
-                type="range"
-                min="0"
-                max={DIFFICULTIES.length - 1}
-                step="1"
-                value={difficultyIndex}
-                aria-label="Difficulty"
-                onInput={(event) => update({ difficulty: DIFFICULTIES[Number(event.currentTarget.value)] })}
-                className="h-2 min-w-0 flex-1 cursor-pointer accent-[#3a3a33]"
-              />
-              <span className="text-xs font-bold text-[#2e2e28]/60">master</span>
+            <label className={labelCls}>Difficulty</label>
+            <div className="grid grid-cols-3 gap-2">
+              {DIFFICULTIES.map((difficulty) => (
+                <Chip
+                  key={difficulty}
+                  selected={setup.difficulty === difficulty}
+                  onClick={() => update({ difficulty })}
+                >
+                  {difficulty}
+                </Chip>
+              ))}
             </div>
           </div>
 
@@ -171,23 +167,23 @@ export function SkirmishScreen({
             </div>
           </div>
 
-          <div>
-            <label className={labelCls}>
-              Night Battle{" "}
-              <span className="mr-1 inline-block rounded bg-[#a3322a] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
-                Beta
-              </span>{" "}
-              <span className="font-normal opacity-60">(dark map lit by lanterns)</span>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <Chip selected={setup.nightBattle} onClick={() => update({ nightBattle: true })}>On</Chip>
-              <Chip selected={!setup.nightBattle} onClick={() => update({ nightBattle: false })}>Off</Chip>
-            </div>
-          </div>
-
           <details className="rounded-2xl bg-[#a49f70] px-4 py-3 text-[#2e2e28]">
             <summary className="cursor-pointer select-none text-sm font-bold">More options</summary>
             <div className="mt-4 flex flex-col gap-4">
+              <div>
+                <label className={labelCls}>
+                  Night Battle{" "}
+                  <span className="mr-1 inline-block rounded bg-[#a3322a] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                    Beta
+                  </span>{" "}
+                  <span className="font-normal opacity-60">(dark map lit by lanterns)</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Chip selected={setup.nightBattle} onClick={() => update({ nightBattle: true })}>On</Chip>
+                  <Chip selected={!setup.nightBattle} onClick={() => update({ nightBattle: false })}>Off</Chip>
+                </div>
+              </div>
+
               <div>
                 <label className={labelCls}>Player color</label>
                 <div className="flex flex-wrap gap-2">

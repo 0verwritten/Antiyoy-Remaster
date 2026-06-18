@@ -747,12 +747,17 @@ export function GameScreen(props: GameScreenProps) {
         <button
           type="button"
           onClick={() => setShowDiplomacy((value) => !value)}
-          className={`absolute top-2 min-h-[40px] rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow ${
+          className={`absolute top-2 inline-flex min-h-[40px] items-center gap-2 rounded-full bg-[#f0eee3] px-4 text-sm font-bold text-[#3a3a33] shadow ${
             props.online ? "right-44" : "right-24"
           }`}
         >
-          Flags
-          {state.diplomacy.proposals.some((p) => p.to === state.turn) ? ` (${state.diplomacy.proposals.filter((p) => p.to === state.turn).length})` : ""}
+          <span>
+            Flags
+            {state.diplomacy.proposals.some((p) => p.to === state.turn) ? ` (${state.diplomacy.proposals.filter((p) => p.to === state.turn).length})` : ""}
+          </span>
+          <span className="rounded bg-[#a3322a] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white">
+            Beta
+          </span>
         </button>
       )}
 
@@ -1030,6 +1035,11 @@ function DiplomacyPanel({
   onAction: (action: Action) => void;
   onClose: () => void;
 }) {
+  const [amountDialog, setAmountDialog] = useState<{
+    kind: "gift" | "subsidy";
+    target: number;
+    amount: number;
+  } | null>(null);
   const me = state.turn;
   const diplomacy = state.diplomacy!;
   const incoming = diplomacy.proposals.filter((p) => p.to === me);
@@ -1040,11 +1050,18 @@ function DiplomacyPanel({
   const buttonCls = "min-h-[34px] rounded-xl bg-[#3a3a33] px-3 text-xs font-bold text-[#f0eee3] shadow active:translate-y-[1px]";
   const ghostCls = "min-h-[34px] rounded-xl bg-[#f0eee3] px-3 text-xs font-bold text-[#3a3a33] shadow active:translate-y-[1px]";
 
-  function promptAmount(label: string): number | null {
-    const raw = prompt(label, "10");
-    if (raw === null) return null;
-    const value = Math.floor(Number(raw));
-    return Number.isFinite(value) && value > 0 ? value : null;
+  function availableAmount(kind: "gift" | "subsidy"): number {
+    const provinces = state.provinces.filter((province) => province.fraction === me);
+    const money = provinces.reduce((sum, province) => sum + province.money, 0);
+    if (kind === "gift") return money;
+    const income = provinces.reduce((sum, province) => sum + Math.max(0, getProvinceProfit(state, province)), 0);
+    return Math.min(money, income);
+  }
+
+  function openAmountDialog(kind: "gift" | "subsidy", target: number) {
+    const max = availableAmount(kind);
+    if (max < 1) return;
+    setAmountDialog({ kind, target, amount: Math.min(10, max) });
   }
 
   function confirmDeclareWar(fraction: number) {
@@ -1071,6 +1088,11 @@ function DiplomacyPanel({
             const relation = getRelation(state, me, fraction);
             const color = displayFractionColor(state.config, fraction);
             const blackMarked = diplomacy.blackMarks.includes(fraction);
+            const friendshipPending = diplomacy.proposals.some(
+              (proposal) => proposal.from === me && proposal.to === fraction && proposal.kind === "friendship"
+            );
+            const giftAvailable = availableAmount("gift") > 0;
+            const subsidyAvailable = availableAmount("subsidy") > 0;
             return (
               <div key={fraction} className="rounded-xl bg-[#e2dfc8] p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -1093,27 +1115,30 @@ function DiplomacyPanel({
                     </button>
                   )}
                   {relation !== "friend" && (
-                    <button type="button" className={ghostCls} onClick={() => onAction({ type: "proposeExchange", to: fraction, kind: "friendship" })}>
-                      Friendship
+                    <button
+                      type="button"
+                      disabled={friendshipPending}
+                      className={`${ghostCls} disabled:cursor-default disabled:opacity-60 disabled:active:translate-y-0`}
+                      onClick={() => onAction({ type: "proposeExchange", to: fraction, kind: "friendship" })}
+                    >
+                      {friendshipPending ? "Friendship sent ✓" : "Friendship"}
                     </button>
                   )}
                   <button
                     type="button"
-                    className={ghostCls}
-                    onClick={() => {
-                      const amount = promptAmount("Gift amount:");
-                      if (amount) onAction({ type: "proposeExchange", to: fraction, kind: "gift", amount });
-                    }}
+                    disabled={!giftAvailable}
+                    title={giftAvailable ? "" : "No coins available"}
+                    className={`${ghostCls} disabled:cursor-default disabled:opacity-40 disabled:active:translate-y-0`}
+                    onClick={() => openAmountDialog("gift", fraction)}
                   >
                     Gift
                   </button>
                   <button
                     type="button"
-                    className={ghostCls}
-                    onClick={() => {
-                      const amount = promptAmount("Subsidy per round:");
-                      if (amount) onAction({ type: "proposeExchange", to: fraction, kind: "subsidy", amount });
-                    }}
+                    disabled={!subsidyAvailable}
+                    title={subsidyAvailable ? "" : "No income available for a subsidy"}
+                    className={`${ghostCls} disabled:cursor-default disabled:opacity-40 disabled:active:translate-y-0`}
+                    onClick={() => openAmountDialog("subsidy", fraction)}
                   >
                     Subsidy
                   </button>
@@ -1161,6 +1186,73 @@ function DiplomacyPanel({
           ))}
         </section>
       </div>
+
+      {amountDialog && (() => {
+        const max = Math.max(1, availableAmount(amountDialog.kind));
+        const presets = Array.from(new Set([5, 10, 25, 50, max]))
+          .filter((amount) => amount <= max)
+          .sort((a, b) => a - b);
+        const label = amountDialog.kind === "gift" ? "Gift amount" : "Subsidy per round";
+        return (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-black/45 p-4" role="dialog" aria-modal="true" aria-labelledby="diplomacy-amount-title">
+            <div className="w-full rounded-2xl bg-[#e2dfc8] p-4 shadow-xl">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h3 id="diplomacy-amount-title" className="font-black">{label}</h3>
+                  <p className="text-xs font-bold opacity-60">To {fractionLabel(state, amountDialog.target)}</p>
+                </div>
+                <button type="button" onClick={() => setAmountDialog(null)} className="px-2 font-black" aria-label="Close amount dialog">X</button>
+              </div>
+
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                {presets.map((amount) => (
+                  <button
+                    key={amount}
+                    type="button"
+                    className={amountDialog.amount === amount ? buttonCls : ghostCls}
+                    onClick={() => setAmountDialog({ ...amountDialog, amount })}
+                  >
+                    {amount}
+                  </button>
+                ))}
+              </div>
+
+              <label className="mb-2 block text-sm font-bold" htmlFor="diplomacy-amount-slider">
+                Amount: {amountDialog.amount}
+              </label>
+              <input
+                id="diplomacy-amount-slider"
+                type="range"
+                min="1"
+                max={max}
+                step="1"
+                value={Math.min(amountDialog.amount, max)}
+                onInput={(event) => setAmountDialog({ ...amountDialog, amount: Number(event.currentTarget.value) })}
+                className="mb-5 h-2 w-full cursor-pointer accent-[#3a3a33]"
+              />
+
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" className={ghostCls} onClick={() => setAmountDialog(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className={buttonCls}
+                  onClick={() => {
+                    onAction({
+                      type: "proposeExchange",
+                      to: amountDialog.target,
+                      kind: amountDialog.kind,
+                      amount: Math.min(amountDialog.amount, max),
+                    });
+                    setAmountDialog(null);
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
