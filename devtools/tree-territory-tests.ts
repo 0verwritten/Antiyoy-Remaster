@@ -97,7 +97,7 @@ function province0(state: GameState) {
   assert(enemyTree.fraction === 0, "captured tree hex changes owner");
   assert(enemyTree.obj === "none", "captured tree is cut");
   assert(enemyTree.unit?.strength === 3 && enemyTree.unit.readyToMove === false, "capturing unit lands spent");
-  assert(province.money === moneyBefore + TREE_CUT_REWARD, "capturing tree pays cut reward");
+  assert(province.money === moneyBefore, "capturing tree pays no cut reward");
 }
 
 // Own-land trees remain valid movement targets and are cut for the same reward.

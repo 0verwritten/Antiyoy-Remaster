@@ -126,6 +126,37 @@ for (const mode of ["antiyoy", "slay"] as const) {
   console.log("deferred detached death: unit removed on owner turn");
 }
 
+// Eliminating a faction also leaves its remaining warriors visible until the
+// next active turn starts. Eliminated factions have no owner turn to clean up on.
+{
+  const scenario = parseLevelString(
+    "1 1 1 7/" +
+      "0 0 0 3 0 0 100#" +
+      "1 0 0 0 4 1 100#" +
+      "2 0 1 0 0 0 10#" +
+      "3 0 1 0 1 1 10#" +
+      "10 0 2 3 0 0 10#" +
+      "11 0 2 0 0 0 10",
+    "deferred-elimination-death"
+  );
+  const st = createScenarioGame(scenario);
+  const attacker = st.hexes.find((h) => h.active && h.q === 1 && h.r === 0)!;
+  const target = st.hexes.find((h) => h.active && h.q === 2 && h.r === 0)!;
+  const survivor = st.hexes.find((h) => h.active && h.q === 3 && h.r === 0)!;
+  const capture = applyAction(st, { type: "moveUnit", from: attacker.index, to: target.index });
+  if (!capture.ok) throw new Error(`deferred elimination death: capture failed: ${capture.reason}`);
+  if (st.alive[1]) throw new Error("deferred elimination death: opponent was not eliminated");
+  if (!survivor.unit?.deathPending) {
+    throw new Error("deferred elimination death: remaining warrior died immediately");
+  }
+  const endTurn = applyAction(st, { type: "endTurn" });
+  if (!endTurn.ok) throw new Error(`deferred elimination death: end turn failed: ${endTurn.reason}`);
+  if (survivor.unit || survivor.obj !== "grave") {
+    throw new Error("deferred elimination death: warrior survived the next turn start");
+  }
+  console.log("deferred elimination death: warrior removed at next active turn start");
+}
+
 // Bankruptcy leaves units visible but immobile for one owner turn, then removes them.
 {
   const scenario = parseLevelString(

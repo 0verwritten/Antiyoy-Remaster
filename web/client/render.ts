@@ -9,6 +9,8 @@ import { hexCorners, hexToPixel } from "./hex";
 import { settings } from "./settings";
 import {
   ATLAS_URL,
+  BUILDINGS,
+  BUILDINGS_ATLAS_URL,
   ORIGINAL_FRACTION_COLORS,
   ORIGINAL_NEUTRAL_COLOR,
   ICON_DEFENSE_URL,
@@ -44,6 +46,7 @@ const atlas = new Image();
 let atlasReady = false;
 atlas.onload = () => {
   atlasReady = true;
+  factionSpriteCache.clear();
 };
 // The atlas is served cross-origin (CDN). Request it with CORS so drawing it
 // onto the board canvas does not taint the canvas (the smoke test reads back
@@ -79,6 +82,83 @@ function drawSprite(
   ctx.drawImage(atlas, rect.x, rect.y, rect.w, rect.h, cx - size / 2, cy - size / 2, size, size);
 }
 
+const factionSpriteCache = new Map<string, HTMLCanvasElement>();
+
+/** Recolor the blue faction cloth on a unit while preserving sprite shading. */
+function drawFactionSprite(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  color: string,
+  cx: number,
+  cy: number,
+  size: number
+) {
+  const rect = SPRITES[name];
+  if (!rect || !atlasReady) return;
+
+  const key = `${name}:${color}`;
+  let canvas = factionSpriteCache.get(key);
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.width = rect.w;
+    canvas.height = rect.h;
+    const spriteCtx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!spriteCtx) return;
+    spriteCtx.drawImage(atlas, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
+
+    const pixels = spriteCtx.getImageData(0, 0, rect.w, rect.h);
+    const [tr, tg, tb] = colorToRgb(color);
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const r = pixels.data[i];
+      const g = pixels.data[i + 1];
+      const b = pixels.data[i + 2];
+      // The source atlas uses saturated blue only for faction-specific unit
+      // clothing. Keep skin, weapons, armour, and strength details unchanged.
+      if (b - r < 25 || b - g < 15 || b < 80) continue;
+      const scale = Math.max(0.35, Math.min(1.3, b / 205));
+      pixels.data[i] = Math.min(255, tr * scale);
+      pixels.data[i + 1] = Math.min(255, tg * scale);
+      pixels.data[i + 2] = Math.min(255, tb * scale);
+    }
+    spriteCtx.putImageData(pixels, 0, 0);
+    factionSpriteCache.set(key, canvas);
+  }
+
+  ctx.drawImage(canvas, cx - size / 2, cy - size / 2, size, size);
+}
+
+// Hand-drawn building sprites live in a second CDN-hosted atlas.
+const buildings = new Image();
+let buildingsReady = false;
+buildings.onload = () => {
+  buildingsReady = true;
+};
+buildings.crossOrigin = "anonymous";
+buildings.src = BUILDINGS_ATLAS_URL;
+
+// Draws a building sprite anchored a touch low so its base sits on the tile.
+function drawBuilding(
+  ctx: CanvasRenderingContext2D,
+  name: string,
+  cx: number,
+  cy: number,
+  size: number
+) {
+  const rect = BUILDINGS[name];
+  if (!rect || !buildingsReady) return;
+  ctx.drawImage(
+    buildings,
+    rect.x,
+    rect.y,
+    rect.w,
+    rect.h,
+    cx - size / 2,
+    cy - size / 2 - size * 0.08,
+    size,
+    size
+  );
+}
+
 // --- color helpers -----------------------------------------------------------
 
 // Preferred-color rotation for the current frame (set by renderBoard).
@@ -87,14 +167,6 @@ let paletteOffset = 0;
 function fractionColor(fraction: number): string {
   if (night) return rgbStr(night.lightRgb(fraction));
   if (fraction >= NEUTRAL_FRACTION) return ORIGINAL_NEUTRAL_COLOR;
-  return (
-    ORIGINAL_FRACTION_COLORS[(fraction + paletteOffset) % ORIGINAL_FRACTION_COLORS.length] ??
-    ORIGINAL_NEUTRAL_COLOR
-  );
-}
-
-function paletteFractionColor(fraction: number): string {
-  if (fraction >= NEUTRAL_FRACTION || fraction < 0) return ORIGINAL_NEUTRAL_COLOR;
   return (
     ORIGINAL_FRACTION_COLORS[(fraction + paletteOffset) % ORIGINAL_FRACTION_COLORS.length] ??
     ORIGINAL_NEUTRAL_COLOR
@@ -824,15 +896,36 @@ function drawObject(
       else drawSprite(ctx, "palm", cx, cy, size);
       break;
     case "town":
-      drawSprite(ctx, state.config.mode === "slay" ? "house" : "castle", cx, cy, size);
+      // Province capital: a house (slay) or castle (default). Fall back to the
+      // original atlas sprite until the buildings atlas has loaded.
+      if (buildingsReady) {
+        drawBuilding(ctx, state.config.mode === "slay" ? "town_house" : "town_castle", cx, cy, size);
+      } else {
+        drawSprite(ctx, state.config.mode === "slay" ? "house" : "castle", cx, cy, size);
+      }
       break;
     case "tower":
-      if (night) drawLantern(ctx, cx, cy, s, night.lightRgb(hex.fraction), false);
-      else drawSprite(ctx, "tower", cx, cy, size);
+      // Day: a watchtower. Night: a glowing street lamp (the surrounding
+      // faction-colored glow is drawn separately by drawLanternGlow).
+      if (night) {
+        if (buildingsReady) drawBuilding(ctx, "tower_night", cx, cy, size);
+        else drawLantern(ctx, cx, cy, s, night.lightRgb(hex.fraction), false);
+      } else if (buildingsReady) {
+        drawBuilding(ctx, "tower_day", cx, cy, size);
+      } else {
+        drawSprite(ctx, "tower", cx, cy, size);
+      }
       break;
     case "strongTower":
-      if (night) drawLantern(ctx, cx, cy, s, night.lightRgb(hex.fraction), true);
-      else drawSprite(ctx, "strong_tower", cx, cy, size);
+      // Day: a fortress. Night: an ornate lamp.
+      if (night) {
+        if (buildingsReady) drawBuilding(ctx, "strong_tower_night", cx, cy, size);
+        else drawLantern(ctx, cx, cy, s, night.lightRgb(hex.fraction), true);
+      } else if (buildingsReady) {
+        drawBuilding(ctx, "strong_tower_day", cx, cy, size);
+      } else {
+        drawSprite(ctx, "strong_tower", cx, cy, size);
+      }
       break;
     case "farm":
       // The original ships three farm pictures; pick one stably per tile.
@@ -868,61 +961,6 @@ function drawUnit(
   const y = cy + bob;
   const sprite = "man" + (unit.strength - 1);
   if (!atlasReady || !SPRITES[sprite]) return;
-  drawSprite(ctx, sprite, cx, y, s * 1.35);
-  drawUnitFactionMarker(ctx, hex.fraction, cx, y, s);
-}
-
-function drawUnitFactionMarker(
-  ctx: CanvasRenderingContext2D,
-  fraction: number,
-  cx: number,
-  cy: number,
-  s: number
-) {
-  const r = Math.max(2.6, s * 0.12);
-  const x = cx + s * 0.16;
-  const y = cy - s * 0.05;
-  const fill = paletteFractionColor(fraction);
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.lineJoin = "round";
-
-  if (night) {
-    ctx.shadowColor = rgbStr(night.lightRgb(fraction));
-    ctx.shadowBlur = Math.max(3, s * 0.12);
-  }
-
-  ctx.beginPath();
-  unitMarkerPath(ctx, r);
-  ctx.fillStyle = "rgba(8,10,14,0.86)";
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.lineWidth = Math.max(1, s * 0.032);
-  ctx.strokeStyle = night ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.72)";
-  ctx.stroke();
-
-  ctx.beginPath();
-  unitMarkerPath(ctx, r * 0.66);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  ctx.lineWidth = Math.max(0.8, s * 0.018);
-  ctx.strokeStyle = shade(fill, -0.42);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(-r * 0.18, -r * 0.22, r * 0.18, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.fill();
-  ctx.restore();
-}
-
-function unitMarkerPath(ctx: CanvasRenderingContext2D, r: number) {
-  ctx.moveTo(0, -r * 1.05);
-  ctx.lineTo(r * 0.9, -r * 0.58);
-  ctx.lineTo(r * 0.72, r * 0.42);
-  ctx.quadraticCurveTo(r * 0.58, r * 0.86, 0, r * 1.1);
-  ctx.quadraticCurveTo(-r * 0.58, r * 0.86, -r * 0.72, r * 0.42);
-  ctx.lineTo(-r * 0.9, -r * 0.58);
-  ctx.closePath();
+  const color = night ? rgbStr(night.tileRgb(hex.fraction)) : fractionColor(hex.fraction);
+  drawFactionSprite(ctx, sprite, color, cx, y, s * 1.35);
 }

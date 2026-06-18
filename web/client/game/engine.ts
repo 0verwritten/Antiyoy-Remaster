@@ -375,17 +375,21 @@ function markUnitForDeferredDeath(hex: HexTile) {
 
 function removeDeferredDeathsForTurn(state: GameState, fraction: Fraction) {
   for (const hex of state.hexes) {
-    if (!hex.active || hex.fraction !== fraction || !hex.unit?.deathPending) continue;
+    if (!hex.active || !hex.unit?.deathPending) continue;
+    const ownerEliminated =
+      hex.fraction >= 0 &&
+      hex.fraction < state.config.playerCount &&
+      !state.alive[hex.fraction];
+    if (hex.fraction !== fraction && !ownerEliminated) continue;
     hex.unit = null;
     if (hex.obj === "none") hex.obj = "grave";
   }
 }
 
-function removeUnitsForEliminatedFraction(state: GameState, fraction: Fraction) {
+function markUnitsForEliminatedFraction(state: GameState, fraction: Fraction) {
   for (const hex of state.hexes) {
     if (!hex.active || hex.fraction !== fraction || !hex.unit) continue;
-    hex.unit = null;
-    if (hex.obj === "none") hex.obj = "grave";
+    markUnitForDeferredDeath(hex);
   }
 }
 
@@ -738,7 +742,11 @@ function placeUnitOnHex(
     ready = readyToMove && target.unit.readyToMove;
   }
   if (target.obj === "pine" || target.obj === "palm") {
-    if (actingProvince) actingProvince.money += TREE_CUT_REWARD;
+    // Cutting pays only when the tree was already inside the acting
+    // province's territory. Capturing a tree clears it but earns no reward.
+    if (actingProvince && target.fraction === actingProvince.fraction) {
+      actingProvince.money += TREE_CUT_REWARD;
+    }
     target.obj = "none";
   } else if (target.obj === "grave") {
     target.obj = "none";
@@ -916,7 +924,7 @@ function checkElimination(state: GameState) {
     if (!state.alive[p]) continue;
     if (getProvincesOf(state, p).length === 0) {
       state.alive[p] = false;
-      removeUnitsForEliminatedFraction(state, p);
+      markUnitsForEliminatedFraction(state, p);
       eliminated = true;
       onFractionEliminated(state, p); // scrub diplomacy (no-op without diplomacy)
     }

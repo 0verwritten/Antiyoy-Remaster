@@ -50,7 +50,6 @@ function captureValue(state: GameState, hex: HexTile): number {
   if (hex.obj === "farm") value += 30;
   if (hex.obj === "tower") value += 20;
   if (hex.obj === "strongTower") value += 25;
-  if (hex.obj === "pine" || hex.obj === "palm") value += 5; // tree-cut bonus
   if (hex.unit) value += hex.unit.strength * 15;
   if (hex.fraction !== NEUTRAL_FRACTION) value += 8; // hurting a player beats neutral land
   return value;
