@@ -2,7 +2,7 @@
 // own canvas, with a per-step money delta readout.
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { applyAction } from "../game/engine";
+import { applyAction, getProvinceProfit } from "../game/engine";
 import type { Action, GameState, ReplayStep } from "../game/types";
 import { fitToIsland, HEX_SIZE, makeCamera, type Camera } from "../camera";
 import { renderBoard } from "../render";
@@ -90,6 +90,21 @@ export function ReplayViewer({
 
   const current = step > 0 ? steps[step - 1] : null;
   const replayState = stateRef.current;
+  const activeFraction = replayState.turn;
+  let turnStartStep = step;
+  while (turnStartStep > 0) {
+    const previous = steps[turnStartStep - 1];
+    if (previous.action.type === "endTurn" || previous.actor !== activeFraction) break;
+    turnStartStep--;
+  }
+  const turnStartState = structuredClone(initialState);
+  for (let i = 0; i < turnStartStep; i++) applyAction(turnStartState, steps[i].action);
+  const turnStartIncome = turnStartState.provinces
+    .filter((province) => province.fraction === activeFraction)
+    .reduce((sum, province) => sum + getProvinceProfit(turnStartState, province), 0);
+  const turnSpent = steps
+    .slice(turnStartStep, step)
+    .reduce((sum, replayStep) => sum + Math.max(0, -(replayStep.moneyDelta[activeFraction] ?? 0)), 0);
 
   return (
     <div className="absolute inset-0 z-30 overflow-hidden bg-[#2a628f] text-[#3a3a33]">
@@ -114,6 +129,17 @@ export function ReplayViewer({
       </div>
 
       <div className="absolute bottom-24 left-2 right-2 rounded-2xl bg-[#f0eee3] p-3 shadow-[0_3px_0_rgba(0,0,0,0.3)] sm:bottom-4 sm:left-1/2 sm:right-auto sm:w-[min(560px,calc(100%-2rem))] sm:-translate-x-1/2">
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-[#e2dfc8] px-3 py-2 text-sm font-black">
+          <span className="flex items-center gap-2">
+            <span
+              className="h-3.5 w-3.5 rounded-full ring-1 ring-black/20"
+              style={{ background: displayFractionColor(initialState.config, activeFraction) }}
+            />
+            P{activeFraction + 1} income at turn start: {turnStartIncome >= 0 ? "+" : ""}{turnStartIncome}
+          </span>
+          <span className="whitespace-nowrap text-[#a3322a]">Spent: {turnSpent}</span>
+        </div>
+
         <div className="mb-2 text-xs font-black uppercase tracking-wide opacity-70">Money earned / spent this step</div>
         <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
           {Array.from({ length: initialState.config.playerCount }, (_, fraction) => {

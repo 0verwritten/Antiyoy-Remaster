@@ -83,36 +83,38 @@ export function SettingsPanel() {
 
       <Toggle label="Ask before ending turn" value={settings.confirmEndTurn} onChange={(v) => setSetting("confirmEndTurn", v)} />
       <Toggle label="Show turn timer" value={settings.showTurnTimer} onChange={(v) => setSetting("showTurnTimer", v)} />
-      <Toggle
-        label="Resume button on main menu"
-        value={settings.showResumeButton}
-        onChange={(v) => setSetting("showResumeButton", v)}
-      />
 
-      <section aria-labelledby="additional-settings-heading" className="flex flex-col gap-4 rounded-2xl bg-[#a39e70] p-4">
-        <h3 id="additional-settings-heading" className="text-lg font-black text-[#2e2e28]">
+      <details className="rounded-2xl bg-[#a39e70] p-4 text-[#2e2e28]">
+        <summary className="cursor-pointer select-none text-lg font-black">
           Additional
-        </h3>
-        <Toggle
-          label="Auto-select next unit"
-          value={settings.autoTransition}
-          onChange={(v) => setSetting("autoTransition", v)}
-        />
-        <Toggle label="Left-handed layout" value={settings.leftHanded} onChange={(v) => setSetting("leftHanded", v)} />
-        <Toggle label="Hold to march" value={settings.holdToMarch} onChange={(v) => setSetting("holdToMarch", v)} />
-        <Toggle label="Unit animations" value={settings.unitAnimations} onChange={(v) => setSetting("unitAnimations", v)} />
-        <div>
-          <label className={labelCls}>Hex outlines</label>
-          <div className="grid grid-cols-2 gap-2">
-            <Chip selected={!settings.showAllBorders} onClick={() => setSetting("showAllBorders", false)}>
-              Territory borders
-            </Chip>
-            <Chip selected={settings.showAllBorders} onClick={() => setSetting("showAllBorders", true)}>
-              Full grid
-            </Chip>
+        </summary>
+        <div className="mt-4 flex flex-col gap-4">
+          <Toggle
+            label="Auto-select next unit"
+            value={settings.autoTransition}
+            onChange={(v) => setSetting("autoTransition", v)}
+          />
+          <Toggle label="Left-handed layout" value={settings.leftHanded} onChange={(v) => setSetting("leftHanded", v)} />
+          <Toggle label="Hold to march" value={settings.holdToMarch} onChange={(v) => setSetting("holdToMarch", v)} />
+          <Toggle label="Unit animations" value={settings.unitAnimations} onChange={(v) => setSetting("unitAnimations", v)} />
+          <Toggle
+            label="Resume button on main menu"
+            value={settings.showResumeButton}
+            onChange={(v) => setSetting("showResumeButton", v)}
+          />
+          <div>
+            <label className={labelCls}>Hex outlines</label>
+            <div className="grid grid-cols-2 gap-2">
+              <Chip selected={!settings.showAllBorders} onClick={() => setSetting("showAllBorders", false)}>
+                Territory borders
+              </Chip>
+              <Chip selected={settings.showAllBorders} onClick={() => setSetting("showAllBorders", true)}>
+                Full grid
+              </Chip>
+            </div>
           </div>
         </div>
-      </section>
+      </details>
 
       <div>
         <label className={labelCls}>Fullscreen</label>
