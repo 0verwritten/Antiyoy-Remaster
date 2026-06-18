@@ -823,29 +823,6 @@ function drawBorders(
     }
   }
 
-  // White pulsing outline around the selected territory.
-  if (highlight) {
-    const pulse = 0.55 + 0.35 * (0.5 + 0.5 * Math.sin(rs.now / 280));
-    ctx.strokeStyle = `rgba(255,255,255,${pulse.toFixed(3)})`;
-    for (const idx of highlight) {
-      const hex = state.hexes[idx];
-      if (!hex?.active) continue;
-      const { cx, cy, s } = tileScreen(hex, cam);
-      const corners = hexCorners(s);
-      for (let d = 0; d < 6; d++) {
-        const n = neighborAt(state, hex, d);
-        if (n && n.active && highlight.has(n.index)) continue;
-        const k = edgeCorner(d);
-        const a = corners[k];
-        const b = corners[(k + 1) % 6];
-        ctx.beginPath();
-        ctx.moveTo(cx + a.x, cy + a.y);
-        ctx.lineTo(cx + b.x, cy + b.y);
-        ctx.lineWidth = Math.max(2, s * 0.11);
-        ctx.stroke();
-      }
-    }
-  }
 }
 
 function drawZoneMarker(ctx: CanvasRenderingContext2D, hex: HexTile, cam: Camera, now: number) {
