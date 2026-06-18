@@ -785,6 +785,20 @@ function drawBorders(
       const innerNeutral = isNeutral && !ownershipEdge;
       // Night mode keeps the darkness clean — only territory edges are drawn.
       if (night && innerNeutral) continue;
+
+      // A shared edge must be stroked once. Painting it from both tiles made
+      // the later tile overwrite the first, so row-ordered maps rendered a
+      // territory's right/bottom borders differently from its left/top ones.
+      // At owned/neutral boundaries, use the owned tile's border color.
+      if (n?.active) {
+        const neighborIsNeutral = n.fraction >= NEUTRAL_FRACTION;
+        if (isNeutral !== neighborIsNeutral) {
+          if (isNeutral) continue;
+        } else if (hex.index > n.index) {
+          continue;
+        }
+      }
+
       const k = edgeCorner(d);
       const a = corners[k];
       const b = corners[(k + 1) % 6];

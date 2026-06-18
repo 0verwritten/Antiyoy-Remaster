@@ -2,6 +2,7 @@
 // recording, hotseat pass screen and victory overlay.
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useMutation } from "lakebed/client";
 import { PRICE_STRONG_TOWER, PRICE_TOWER } from "../game/constants";
 import {
   applyAction,
@@ -49,6 +50,8 @@ import { evaluateCampaign, CAMPAIGN_LEVEL_COUNT } from "../game/campaign";
 import { markLevelCompleted } from "../campaign-storage";
 import { ReplayViewer, type ReplayStep } from "./replay";
 import type { Action } from "../game/types";
+import { uploadHumanBattle } from "../training-recording";
+import type { TrainingBattleMetadata } from "../../shared/training";
 
 export interface GameScreenProps {
   screen: Screen;
@@ -72,8 +75,8 @@ export interface GameScreenProps {
     players: string[];
     messages: OnlineChatMessage[];
     sendChat: (body: string) => Promise<void>;
-    onAction: (actor: number, state: GameState) => void;
-    onExit: (kind: "draw" | "resign", state: GameState) => void;
+    onAction: (actor: number, state: GameState, step: ReplayStep) => void;
+    onExit: (kind: "draw" | "resign", state: GameState, step: ReplayStep) => void;
     stateRevision: number;
   };
 }
@@ -112,20 +115,27 @@ export function GameScreen(props: GameScreenProps) {
   const [showOnlineChat, setShowOnlineChat] = useState(false);
   const [showDiplomacy, setShowDiplomacy] = useState(false);
   const [timerNow, setTimerNow] = useState(Date.now());
+  const createTrainingBattle = useMutation<[metadata: TrainingBattleMetadata], string>("createTrainingBattle");
+  const appendTrainingChunk = useMutation<
+    [battleId: string, kind: "initial" | "steps", sequence: number, content: string],
+    void
+  >("appendTrainingChunk");
+  const finishTrainingBattle = useMutation<[battleId: string], void>("finishTrainingBattle");
 
   const [, setUi] = useState(0);
   const refreshUi = useCallback(() => setUi((n) => n + 1), []);
 
   const recordAction = useCallback((event: ActionEvent) => {
-    replayStepsRef.current.push({
+    const step: ReplayStep = {
       action: event.action,
       actor: event.actor,
       moneyDelta: event.moneyAfter.map((money, fraction) => money - event.moneyBefore[fraction]),
-    });
+    };
+    replayStepsRef.current.push(step);
     if (event.action.type === "draw" || event.action.type === "resign") {
-      props.online?.onExit(event.action.type === "draw" ? "draw" : "resign", stateRef.current!);
+      props.online?.onExit(event.action.type === "draw" ? "draw" : "resign", stateRef.current!, step);
     } else {
-      props.online?.onAction(event.actor, stateRef.current!);
+      props.online?.onAction(event.actor, stateRef.current!, step);
     }
   }, [props.online, stateRef]);
 
@@ -415,14 +425,20 @@ export function GameScreen(props: GameScreenProps) {
     refreshUi();
   }, [stateRef, canControlTurn, pushUndo, clearSelection, forceRender, refreshUi]);
 
-  // Persist a replay record once when the game ends.
+  const campaignLevelForRecording =
+    state.session?.source === "campaign" ? state.session.campaignLevel ?? null : null;
+  const campaignStatusForRecording =
+    campaignLevelForRecording != null ? evaluateCampaign(state) : "ongoing";
+
+  // Persist a replay locally and upload an anonymized training trajectory once.
   useEffect(() => {
     const st = stateRef.current;
     const cfg = props.configRef.current;
-    if (!st || !cfg || !isGameOver(st) || replayPersistedRef.current) return;
+    const campaignEnded = campaignLevelForRecording != null && campaignStatusForRecording !== "ongoing";
+    if (!st || !cfg || (!isGameOver(st) && !campaignEnded) || replayPersistedRef.current) return;
     replayPersistedRef.current = true;
     const mode = (cfg.mode ?? "antiyoy") === "slay" ? "Slay" : "Normal";
-    void putReplay({
+    const replay = {
       version: RECORD_VERSION,
       id: newRecordId(),
       name: `${mode} ${cfg.mapSize} ${cfg.playerCount}p`,
@@ -433,8 +449,34 @@ export function GameScreen(props: GameScreenProps) {
       winner: st.winner,
       endReason: st.endReason,
       rounds: st.round,
-    }).catch(() => {});
-  }, [state.winner, state.endReason, stateRef, props.configRef]);
+    };
+    void putReplay(replay).catch(() => {});
+    if (!props.online && cfg.humanCount > 0) {
+      const outcome: TrainingBattleMetadata["outcome"] = campaignEnded
+        ? campaignStatusForRecording === "won" ? "campaign-won" : "campaign-lost"
+        : st.endReason === "draw" ? "draw"
+        : st.endReason === "resignation" ? "resignation"
+        : "victory";
+      void uploadHumanBattle(
+        { create: createTrainingBattle, append: appendTrainingChunk, finish: finishTrainingBattle },
+        structuredClone(st),
+        structuredClone(replayInitialRef.current),
+        structuredClone(replayStepsRef.current),
+        outcome
+      ).catch(() => {});
+    }
+  }, [
+    state.winner,
+    state.endReason,
+    campaignLevelForRecording,
+    campaignStatusForRecording,
+    stateRef,
+    props.configRef,
+    props.online,
+    createTrainingBattle,
+    appendTrainingChunk,
+    finishTrainingBattle,
+  ]);
 
   // ---- pointer interaction (pan/zoom/tap/long-press march) ----
   usePointerControls(

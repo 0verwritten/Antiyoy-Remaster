@@ -1,4 +1,4 @@
-import { boolean, capsule, endpoint, json, mutation, query, string, table, text } from "lakebed/server";
+import { boolean, capsule, endpoint, json, mutation, query, string, table, text, type ServerContext } from "lakebed/server";
 import type {
   OnlineChatMessage,
   OnlineLobby,
@@ -7,15 +7,39 @@ import type {
   OnlinePlayer,
   OnlineSnapshot,
 } from "../shared/online";
+import {
+  TRAINING_CHUNK_SIZE,
+  TRAINING_RECORD_VERSION,
+  type TrainingBattleExport,
+  type TrainingBattleMetadata,
+} from "../shared/training";
+import type { GameState, ReplayStep } from "../client/game/types";
 
 type Row = Record<string, unknown> & { id: string; createdAt: string; updatedAt: string };
 type StateHeader = {
+  config?: { humanCount?: number };
+  round?: number;
   turn?: number;
   version?: number;
   winner?: number | null;
   endReason?: "draw" | "resignation";
   resigned?: number[];
 };
+
+type BattleRow = Row & {
+  uploaderId: string;
+  source: string;
+  configJson: string;
+  winner: string;
+  outcome: string;
+  rounds: string;
+  humanCount: string;
+  initialChunkCount: string;
+  stepChunkCount: string;
+  complete: boolean;
+};
+
+type BattleChunkRow = Row & { battleId: string; kind: string; sequence: string; content: string };
 
 const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#f0eee3"/>
@@ -88,6 +112,84 @@ function cleanConfig(config: OnlineLobbyConfig): OnlineLobbyConfig {
   };
 }
 
+function validTrainingMetadata(value: TrainingBattleMetadata): boolean {
+  const outcomes: TrainingBattleMetadata["outcome"][] = ["victory", "draw", "resignation", "campaign-won", "campaign-lost"];
+  return value.version === TRAINING_RECORD_VERSION &&
+    (value.source === "local" || value.source === "online") &&
+    typeof value.config === "object" && value.config !== null &&
+    value.config.humanCount === value.humanCount &&
+    outcomes.includes(value.outcome) &&
+    (value.winner === null || (Number.isInteger(value.winner) && value.winner >= 0 && value.winner < value.config.playerCount)) &&
+    Number.isInteger(value.humanCount) && value.humanCount > 0 && value.humanCount <= 6 &&
+    Number.isInteger(value.rounds) && value.rounds >= 0 &&
+    Number.isInteger(value.initialChunkCount) && value.initialChunkCount > 0 && value.initialChunkCount <= 20 &&
+    Number.isInteger(value.stepChunkCount) && value.stepChunkCount >= 0 && value.stepChunkCount <= 1000;
+}
+
+function insertBattle(ctx: ServerContext, uploaderId: string, metadata: TrainingBattleMetadata): string {
+  if (!validTrainingMetadata(metadata)) throw new Error("Invalid battle metadata");
+  return ctx.db.trainingBattles.insert({
+    uploaderId,
+    source: metadata.source,
+    configJson: JSON.stringify(metadata.config),
+    winner: metadata.winner == null ? "" : String(metadata.winner),
+    outcome: metadata.outcome,
+    rounds: String(metadata.rounds),
+    humanCount: String(metadata.humanCount),
+    initialChunkCount: String(metadata.initialChunkCount),
+    stepChunkCount: String(metadata.stepChunkCount),
+    complete: false,
+  }).id;
+}
+
+function insertBattleChunk(ctx: ServerContext, battleId: string, kind: "initial" | "steps", sequence: number, content: string) {
+  if (!Number.isInteger(sequence) || sequence < 0 || sequence >= 1000) throw new Error("Invalid chunk sequence");
+  if (typeof content !== "string" || content.length > TRAINING_CHUNK_SIZE) throw new Error("Battle chunk is too large");
+  ctx.db.trainingBattleChunks.insert({ battleId, kind, sequence: String(sequence), content });
+}
+
+function chunksFor(ctx: ServerContext, battleId: string, kind: "initial" | "steps"): BattleChunkRow[] {
+  return (ctx.db.trainingBattleChunks.where("battleId", battleId).where("kind", kind).limit(1000).all() as BattleChunkRow[])
+    .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+}
+
+function validateCompletedBattle(ctx: ServerContext, battle: BattleRow): { initial: GameState; steps: ReplayStep[] } {
+  const initialChunks = chunksFor(ctx, battle.id, "initial");
+  const stepChunks = chunksFor(ctx, battle.id, "steps");
+  if (initialChunks.length !== Number(battle.initialChunkCount) || stepChunks.length !== Number(battle.stepChunkCount)) {
+    throw new Error("Battle upload is incomplete");
+  }
+  const initial = parseJson<GameState | null>(initialChunks.map((chunk) => chunk.content).join(""), null);
+  if (!initial || !Array.isArray(initial.hexes) || !Array.isArray(initial.provinces) || initial.config?.humanCount < 1 ||
+      initial.config.humanCount !== Number(battle.humanCount)) {
+    throw new Error("Invalid initial game state");
+  }
+  const steps: ReplayStep[] = [];
+  for (const chunk of stepChunks) {
+    const batch = parseJson<ReplayStep[]>(chunk.content, []);
+    if (!Array.isArray(batch)) throw new Error("Invalid battle steps");
+    for (const step of batch) {
+      if (!step || typeof step.actor !== "number" || !step.action || typeof step.action.type !== "string") {
+        throw new Error("Invalid battle step");
+      }
+      steps.push(step);
+    }
+  }
+  return { initial, steps };
+}
+
+function finishOnlineBattle(ctx: ServerContext, battleId: string, state: StateHeader) {
+  const row = ctx.db.trainingBattles.get(battleId) as BattleRow | null;
+  if (!row) return;
+  ctx.db.trainingBattles.update(battleId, {
+    winner: state.winner == null ? "" : String(state.winner),
+    outcome: state.endReason === "draw" ? "draw" : state.endReason === "resignation" ? "resignation" : "victory",
+    rounds: String(state.round ?? 0),
+    uploaderId: "",
+    complete: true,
+  });
+}
+
 export default capsule({
   name: "antiyoy-remaster",
 
@@ -103,12 +205,31 @@ export default capsule({
       stateJson2: string().default(""),
       stateVersion: string().default("0"),
       closed: boolean().default(false),
+      trainingBattleId: string().default(""),
     }),
     chatMessages: table({
       lobbyId: string(),
       authorId: string(),
       authorName: string(),
       body: string(),
+    }),
+    trainingBattles: table({
+      uploaderId: string(),
+      source: string(),
+      configJson: string(),
+      winner: string().default(""),
+      outcome: string().default(""),
+      rounds: string().default("0"),
+      humanCount: string(),
+      initialChunkCount: string(),
+      stepChunkCount: string().default("0"),
+      complete: boolean().default(false),
+    }),
+    trainingBattleChunks: table({
+      battleId: string(),
+      kind: string(),
+      sequence: string(),
+      content: string(),
     }),
   },
 
@@ -218,11 +339,30 @@ export default capsule({
       if (lobby.ownerId !== ctx.auth.userId) throw new Error("Only the host can start");
       if (lobby.status !== "waiting") throw new Error("Game already started");
       if (lobby.players.length < lobby.config.humanSlots) throw new Error("Waiting for more players");
-      ctx.db.lobbies.update(lobby.id, { status: "playing", stateJson0, stateJson1, stateJson2, stateVersion: "0" });
+      const initialJson = stateJson0 + stateJson1 + stateJson2;
+      const initial = parseJson<GameState | null>(initialJson, null);
+      if (!initial || initial.config?.humanCount < 1) throw new Error("Invalid initial game state");
+      const battleId = insertBattle(ctx, ctx.auth.userId, {
+        version: TRAINING_RECORD_VERSION,
+        source: "online",
+        config: initial.config,
+        winner: null,
+        outcome: "victory",
+        rounds: 0,
+        humanCount: initial.config.humanCount,
+        initialChunkCount: 3,
+        stepChunkCount: 0,
+      });
+      insertBattleChunk(ctx, battleId, "initial", 0, stateJson0);
+      insertBattleChunk(ctx, battleId, "initial", 1, stateJson1);
+      insertBattleChunk(ctx, battleId, "initial", 2, stateJson2);
+      ctx.db.lobbies.update(lobby.id, {
+        status: "playing", stateJson0, stateJson1, stateJson2, stateVersion: "0", trainingBattleId: battleId,
+      });
     }),
 
     publishOnlineState: mutation(
-      (ctx, lobbyId: string, actor: number, previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => {
+      (ctx, lobbyId: string, actor: number, previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string) => {
         requireAccount(ctx);
         const row = ctx.db.lobbies.get(lobbyId) as Row | null;
         if (!row) throw new Error("Lobby not found");
@@ -242,6 +382,13 @@ export default capsule({
         if (next.endReason !== previous.endReason || JSON.stringify(next.resigned ?? []) !== JSON.stringify(previous.resigned ?? [])) {
           throw new Error("Use the game exit action");
         }
+        const steps = parseJson<ReplayStep[]>(stepJson, []);
+        if (steps.length !== 1 || steps[0].actor !== actor) throw new Error("Invalid replay step");
+        const battleId = String(row.trainingBattleId ?? "");
+        if (battleId) {
+          insertBattleChunk(ctx, battleId, "steps", previousVersion, stepJson);
+          ctx.db.trainingBattles.update(battleId, { stepChunkCount: String(previousVersion + 1) });
+        }
         ctx.db.lobbies.update(lobby.id, {
           stateJson0,
           stateJson1,
@@ -249,11 +396,12 @@ export default capsule({
           stateVersion: String(previousVersion + 1),
           status: next.winner == null && next.endReason !== "draw" ? "playing" : "finished",
         });
+        if (battleId && (next.winner != null || next.endReason === "draw")) finishOnlineBattle(ctx, battleId, next);
       }
     ),
 
     publishOnlineExit: mutation(
-      (ctx, lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => {
+      (ctx, lobbyId: string, kind: "draw" | "resign", previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string) => {
         requireAccount(ctx);
         const row = ctx.db.lobbies.get(lobbyId) as Row | null;
         if (!row) throw new Error("Lobby not found");
@@ -278,6 +426,13 @@ export default capsule({
           }
         }
         const finished = next.winner != null || next.endReason === "draw";
+        const steps = parseJson<ReplayStep[]>(stepJson, []);
+        if (steps.length !== 1 || steps[0].actor !== player.seat) throw new Error("Invalid replay step");
+        const battleId = String(row.trainingBattleId ?? "");
+        if (battleId) {
+          insertBattleChunk(ctx, battleId, "steps", previousVersion, stepJson);
+          ctx.db.trainingBattles.update(battleId, { stepChunkCount: String(previousVersion + 1) });
+        }
         ctx.db.lobbies.update(lobby.id, {
           stateJson0,
           stateJson1,
@@ -285,8 +440,31 @@ export default capsule({
           stateVersion: String(previousVersion + 1),
           status: finished ? "finished" : "playing",
         });
+        if (battleId && finished) finishOnlineBattle(ctx, battleId, next);
       }
     ),
+
+    createTrainingBattle: mutation((ctx, metadata: TrainingBattleMetadata) => {
+      if (metadata.source !== "local") throw new Error("Invalid battle source");
+      return insertBattle(ctx, ctx.auth.userId, metadata);
+    }),
+
+    appendTrainingChunk: mutation((ctx, battleId: string, kind: "initial" | "steps", sequence: number, content: string) => {
+      const battle = ctx.db.trainingBattles.get(battleId) as BattleRow | null;
+      if (!battle || battle.uploaderId !== ctx.auth.userId || battle.complete) throw new Error("Battle upload not found");
+      if (kind !== "initial" && kind !== "steps") throw new Error("Invalid chunk kind");
+      const duplicate = (ctx.db.trainingBattleChunks.where("battleId", battleId).limit(1000).all() as BattleChunkRow[])
+        .some((chunk) => chunk.kind === kind && Number(chunk.sequence) === sequence);
+      if (duplicate) throw new Error("Battle chunk already uploaded");
+      insertBattleChunk(ctx, battleId, kind, sequence, content);
+    }),
+
+    finishTrainingBattle: mutation((ctx, battleId: string) => {
+      const battle = ctx.db.trainingBattles.get(battleId) as BattleRow | null;
+      if (!battle || battle.uploaderId !== ctx.auth.userId || battle.complete) throw new Error("Battle upload not found");
+      validateCompletedBattle(ctx, battle);
+      ctx.db.trainingBattles.update(battleId, { uploaderId: "", complete: true });
+    }),
 
     sendChat: mutation((ctx, body: string) => {
       requireAccount(ctx);
@@ -305,6 +483,36 @@ export default capsule({
 
   endpoints: {
     status: endpoint({ method: "GET", path: "/api/status" }, () => text("ok")),
+    trainingBattles: endpoint({ method: "GET", path: "/api/training-battles.json" }, (ctx, req) => {
+      const exportKey = ctx.env.TRAINING_EXPORT_KEY;
+      const suppliedKey = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? req.query.get("key");
+      if (!exportKey || suppliedKey !== exportKey) return json({ error: "Unauthorized" }, { status: 401 });
+      const requestedLimit = Number(req.query.get("limit") ?? 10);
+      const limit = Math.max(1, Math.min(100, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 10));
+      const rows = ctx.db.trainingBattles.where("complete", true).orderBy("createdAt", "desc").limit(limit).all() as BattleRow[];
+      const battles: TrainingBattleExport[] = [];
+      for (const row of rows) {
+        const data = validateCompletedBattle(ctx, row);
+        battles.push({
+          version: TRAINING_RECORD_VERSION,
+          id: row.id,
+          createdAt: row.createdAt,
+          source: row.source === "online" ? "online" : "local",
+          config: parseJson(row.configJson, data.initial.config),
+          winner: row.winner === "" ? null : Number(row.winner),
+          outcome: row.outcome as TrainingBattleMetadata["outcome"],
+          rounds: Number(row.rounds),
+          humanCount: Number(row.humanCount),
+          initialChunkCount: Number(row.initialChunkCount),
+          stepChunkCount: Number(row.stepChunkCount),
+          initial: data.initial,
+          steps: data.steps,
+        });
+      }
+      return json({ version: TRAINING_RECORD_VERSION, battles }, {
+        headers: { "Content-Disposition": "attachment; filename=antiyoy-training-battles.json", "Cache-Control": "no-store" },
+      });
+    }),
     manifest: endpoint({ method: "GET", path: "/api/manifest.webmanifest" }, () =>
       json(
         {

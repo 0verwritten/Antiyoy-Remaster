@@ -1,7 +1,7 @@
 import { SignInWithGoogle, signOut, useAuth, useMutation, useQuery } from "lakebed/client";
 import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import type { GameConfig, GameState } from "../game/types";
+import type { GameConfig, GameState, ReplayStep } from "../game/types";
 import { createGame } from "../game/engine";
 import { MENU_BACKGROUND_COLOR } from "../sprites";
 import { Chip, MenuButton } from "../ui/controls";
@@ -20,11 +20,11 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
   const leaveLobby = useMutation<[], void>("leaveLobby");
   const startLobby = useMutation<[lobbyId: string, stateJson0: string, stateJson1: string, stateJson2: string], void>("startLobby");
   const publishState = useMutation<
-    [lobbyId: string, actor: number, previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string],
+    [lobbyId: string, actor: number, previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string],
     void
   >("publishOnlineState");
   const publishExit = useMutation<
-    [lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string],
+    [lobbyId: string, kind: "draw" | "resign", previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string],
     void
   >("publishOnlineExit");
   const sendChat = useMutation<[body: string], void>("sendChat");
@@ -187,8 +187,8 @@ export function OnlineScreen({ onBack }: { onBack: () => void }) {
 function OnlineGame({ snapshot, userId, publishState, publishExit, sendChat, onMenu }: {
   snapshot: OnlineSnapshot;
   userId: string;
-  publishState: (lobbyId: string, actor: number, previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
-  publishExit: (lobbyId: string, kind: "draw" | "resign", previousVersion: number, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
+  publishState: (lobbyId: string, actor: number, previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
+  publishExit: (lobbyId: string, kind: "draw" | "resign", previousVersion: number, stepJson: string, stateJson0: string, stateJson1: string, stateJson2: string) => Promise<void>;
   sendChat: (body: string) => Promise<void>;
   onMenu: () => void;
 }) {
@@ -213,12 +213,12 @@ function OnlineGame({ snapshot, userId, publishState, publishExit, sendChat, onM
     forceRender();
   }, [lobby.stateJson, lobby.stateVersion, forceRender]);
 
-  const onAction = useCallback((actor: number, state: GameState) => {
+  const onAction = useCallback((actor: number, state: GameState, step: ReplayStep) => {
     const chunks = splitState(state);
     const previousVersion = serverVersionRef.current + pendingRef.current;
     pendingRef.current++;
     queueRef.current = queueRef.current
-      .then(() => publishState(lobby.id, actor, previousVersion, chunks[0], chunks[1], chunks[2]))
+      .then(() => publishState(lobby.id, actor, previousVersion, JSON.stringify([step]), chunks[0], chunks[1], chunks[2]))
       .then(() => {
         serverVersionRef.current++;
         pendingRef.current--;
@@ -228,12 +228,12 @@ function OnlineGame({ snapshot, userId, publishState, publishExit, sendChat, onM
       });
   }, [lobby.id, publishState]);
 
-  const onExit = useCallback((kind: "draw" | "resign", state: GameState) => {
+  const onExit = useCallback((kind: "draw" | "resign", state: GameState, step: ReplayStep) => {
     const chunks = splitState(state);
     const previousVersion = serverVersionRef.current + pendingRef.current;
     pendingRef.current++;
     queueRef.current = queueRef.current
-      .then(() => publishExit(lobby.id, kind, previousVersion, chunks[0], chunks[1], chunks[2]))
+      .then(() => publishExit(lobby.id, kind, previousVersion, JSON.stringify([step]), chunks[0], chunks[1], chunks[2]))
       .then(() => {
         serverVersionRef.current++;
         pendingRef.current--;
