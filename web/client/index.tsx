@@ -20,7 +20,7 @@ import { OnlineScreen } from "./screens/online";
 import { GameScreen } from "./screens/game";
 import { createCampaignLevelGame, ensureCampaignData, evaluateCampaign, levelNeedsData } from "./game/campaign";
 import { setupPwa } from "./pwa";
-import { clearOnlineDeepLink, shouldReturnToOnline } from "./online-return";
+import { clearOnlineDeepLink, clearScreenDeepLink, screenFromUrl, shouldReturnToOnline } from "./online-return";
 
 if (typeof window !== "undefined") setupPwa();
 
@@ -56,6 +56,7 @@ function isResumableState(state: GameState | null): state is GameState {
 
 export function App() {
   const [screen, setScreen] = useState<Screen>(() => {
+    if (screenFromUrl() === "settings") return { kind: "settings" };
     return shouldReturnToOnline() ? { kind: "online" } : { kind: "main" };
   });
   const stateRef = useRef<GameState | null>(null);
@@ -190,7 +191,10 @@ export function App() {
         setScreen({ kind: "chooseMode" });
       }} />;
     case "settings":
-      return <SettingsScreen onBack={() => setScreen({ kind: "main" })} />;
+      return <SettingsScreen onBack={() => {
+        clearScreenDeepLink("settings");
+        setScreen({ kind: "main" });
+      }} />;
     case "about":
       return <AboutScreen onBack={() => setScreen({ kind: "main" })} />;
     case "load":

@@ -10,7 +10,6 @@ const DB_VERSION = 1;
 export const RECORD_VERSION = 1;
 
 export const AUTOSAVE_ID = "autosave";
-const REPLAY_LIMIT = 20;
 
 export interface SaveRecord {
   version: typeof RECORD_VERSION;
@@ -18,6 +17,7 @@ export interface SaveRecord {
   name: string;
   createdAt: number;
   updatedAt: number;
+  deletedAt?: number;
   config: GameConfig;
   state: GameState;
   /** Snapshot at game start plus recorded steps, so replays survive save/load. */
@@ -30,6 +30,8 @@ export interface ReplayRecord {
   id: string;
   name: string;
   createdAt: number;
+  updatedAt?: number;
+  deletedAt?: number;
   config: GameConfig;
   initial: GameState;
   steps: ReplayStep[];
@@ -95,14 +97,42 @@ export function validateReplayRecord(raw: unknown): ReplayRecord | null {
   if (!r || r.version !== RECORD_VERSION || typeof r.id !== "string") return null;
   if (!looksLikeGameState(r.initial) || !Array.isArray(r.steps)) return null;
   if (typeof r.name !== "string") return null;
+  if (typeof r.updatedAt !== "number") r.updatedAt = r.createdAt;
   return r as ReplayRecord;
+}
+
+async function getRaw<T>(store: StoreName, id: string): Promise<T | undefined> {
+  return tx<T | undefined>(store, "readonly", (s) => s.get(id) as IDBRequest<T | undefined>);
+}
+
+async function putRaw(store: StoreName, record: Record<string, unknown>): Promise<void> {
+  await tx(store, "readwrite", (s) => s.put(record));
+}
+
+async function getAllRaw<T>(store: StoreName): Promise<T[]> {
+  return tx<T[]>(store, "readonly", (s) => s.getAll() as IDBRequest<T[]>);
+}
+
+function recordTimestamp(record: { updatedAt?: number; createdAt?: number; deletedAt?: number }) {
+  return Math.max(record.updatedAt ?? 0, record.createdAt ?? 0, record.deletedAt ?? 0);
+}
+
+function tombstone(id: string, kind: StoreName, now = Date.now()) {
+  return {
+    version: RECORD_VERSION,
+    id,
+    name: kind === "saves" ? "Deleted save" : "Deleted replay",
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: now,
+  };
 }
 
 // --- saves ---------------------------------------------------------------
 
 export async function listSaves(): Promise<SaveRecord[]> {
   const all = await tx<SaveRecord[]>("saves", "readonly", (s) => s.getAll() as IDBRequest<SaveRecord[]>);
-  return all.filter((r) => validateSaveRecord(r)).sort((a, b) => b.updatedAt - a.updatedAt);
+  return all.filter((r) => !r.deletedAt && validateSaveRecord(r)).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function putSave(record: SaveRecord): Promise<void> {
@@ -110,7 +140,9 @@ export async function putSave(record: SaveRecord): Promise<void> {
 }
 
 export async function deleteSave(id: string): Promise<void> {
-  await tx("saves", "readwrite", (s) => s.delete(id));
+  const now = Date.now();
+  const existing = await getRaw<Record<string, unknown>>("saves", id);
+  await putRaw("saves", { ...(existing ?? tombstone(id, "saves", now)), updatedAt: now, deletedAt: now });
 }
 
 export async function latestSave(): Promise<SaveRecord | null> {
@@ -122,20 +154,50 @@ export async function latestSave(): Promise<SaveRecord | null> {
 
 export async function listReplays(): Promise<ReplayRecord[]> {
   const all = await tx<ReplayRecord[]>("replays", "readonly", (s) => s.getAll() as IDBRequest<ReplayRecord[]>);
-  return all.filter((r) => validateReplayRecord(r)).sort((a, b) => b.createdAt - a.createdAt);
+  return all.filter((r) => !r.deletedAt && validateReplayRecord(r)).sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
 }
 
 export async function putReplay(record: ReplayRecord): Promise<void> {
-  await tx("replays", "readwrite", (s) => s.put(record));
-  // Keep the library bounded; drop the oldest entries beyond the limit.
-  const all = await listReplays();
-  for (const old of all.slice(REPLAY_LIMIT)) {
-    await deleteReplay(old.id);
-  }
+  await tx("replays", "readwrite", (s) => s.put({ ...record, updatedAt: record.updatedAt ?? record.createdAt }));
 }
 
 export async function deleteReplay(id: string): Promise<void> {
-  await tx("replays", "readwrite", (s) => s.delete(id));
+  const now = Date.now();
+  const existing = await getRaw<Record<string, unknown>>("replays", id);
+  await putRaw("replays", { ...(existing ?? tombstone(id, "replays", now)), updatedAt: now, deletedAt: now });
+}
+
+export type GameLibraryKind = "save" | "replay";
+export type GameLibraryRecord = (SaveRecord | ReplayRecord | Record<string, unknown>) & {
+  id: string;
+  name?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  deletedAt?: number;
+};
+
+function storeForKind(kind: GameLibraryKind): StoreName {
+  return kind === "save" ? "saves" : "replays";
+}
+
+export async function listAllGameRecords(): Promise<Array<{ kind: GameLibraryKind; record: GameLibraryRecord }>> {
+  const [saves, replays] = await Promise.all([
+    getAllRaw<GameLibraryRecord>("saves"),
+    getAllRaw<GameLibraryRecord>("replays"),
+  ]);
+  return [
+    ...saves.filter((record) => typeof record?.id === "string").map((record) => ({ kind: "save" as const, record })),
+    ...replays.filter((record) => typeof record?.id === "string").map((record) => ({ kind: "replay" as const, record })),
+  ];
+}
+
+export async function mergeGameRecord(kind: GameLibraryKind, incoming: GameLibraryRecord): Promise<boolean> {
+  if (typeof incoming.id !== "string") return false;
+  const store = storeForKind(kind);
+  const current = await getRaw<GameLibraryRecord>(store, incoming.id);
+  if (current && recordTimestamp(current) >= recordTimestamp(incoming)) return false;
+  await putRaw(store, incoming);
+  return true;
 }
 
 // --- JSON import/export -----------------------------------------------------

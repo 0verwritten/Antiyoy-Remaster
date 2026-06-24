@@ -13,6 +13,11 @@ import {
   type TrainingBattleExport,
   type TrainingBattleMetadata,
 } from "../shared/training";
+import {
+  GAME_SYNC_CHUNK_SIZE,
+  GAME_SYNC_RECORD_VERSION,
+  type GameSyncRecord,
+} from "../shared/sync";
 import type { GameState, ReplayStep } from "../client/game/types";
 
 type Row = Record<string, unknown> & { id: string; createdAt: string; updatedAt: string };
@@ -40,6 +45,17 @@ type BattleRow = Row & {
 };
 
 type BattleChunkRow = Row & { battleId: string; kind: string; sequence: string; content: string };
+type GameSyncRow = Row & {
+  userId: string;
+  kind: string;
+  clientId: string;
+  name: string;
+  createdMs: string;
+  updatedMs: string;
+  deletedMs: string;
+  chunkCount: string;
+};
+type GameSyncChunkRow = Row & { recordId: string; sequence: string; content: string };
 
 const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#f0eee3"/>
@@ -49,6 +65,9 @@ const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 
 const SERVICE_WORKER = `const CACHE = "antiyoy-shell-v1";
 self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
+});
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
@@ -190,6 +209,76 @@ function finishOnlineBattle(ctx: ServerContext, battleId: string, state: StateHe
   });
 }
 
+function validSyncRecord(record: GameSyncRecord): boolean {
+  return record.version === GAME_SYNC_RECORD_VERSION &&
+    (record.kind === "save" || record.kind === "replay") &&
+    typeof record.id === "string" && record.id.length > 0 && record.id.length <= 120 &&
+    typeof record.name === "string" && record.name.length <= 200 &&
+    Number.isFinite(record.createdAt) && record.createdAt >= 0 &&
+    Number.isFinite(record.updatedAt) && record.updatedAt >= 0 &&
+    (record.deletedAt === null || (Number.isFinite(record.deletedAt) && record.deletedAt >= 0)) &&
+    Array.isArray(record.chunks) && record.chunks.length <= 1000 &&
+    record.chunks.every((chunk) => typeof chunk === "string" && chunk.length <= GAME_SYNC_CHUNK_SIZE);
+}
+
+function gameSyncChunksFor(ctx: ServerContext, recordId: string): GameSyncChunkRow[] {
+  return (ctx.db.gameSyncChunks.where("recordId", recordId).limit(1000).all() as GameSyncChunkRow[])
+    .sort((a, b) => Number(a.sequence) - Number(b.sequence));
+}
+
+function listGameSyncRecords(ctx: ServerContext, userId: string): GameSyncRecord[] {
+  const rows = ctx.db.gameSyncRecords.where("userId", userId).limit(1000).all() as GameSyncRow[];
+  return rows
+    .sort((a, b) => Number(b.updatedMs) - Number(a.updatedMs))
+    .map((row): GameSyncRecord => ({
+      version: GAME_SYNC_RECORD_VERSION,
+      kind: row.kind === "save" ? "save" : "replay",
+      id: row.clientId,
+      name: row.name,
+      createdAt: Number(row.createdMs),
+      updatedAt: Number(row.updatedMs),
+      deletedAt: row.deletedMs ? Number(row.deletedMs) : null,
+      chunks: gameSyncChunksFor(ctx, row.id).map((chunk) => chunk.content),
+    }));
+}
+
+function findGameSyncRow(ctx: ServerContext, userId: string, kind: string, clientId: string): GameSyncRow | null {
+  const rows = ctx.db.gameSyncRecords
+    .where("userId", userId)
+    .where("kind", kind)
+    .where("clientId", clientId)
+    .limit(1)
+    .all() as GameSyncRow[];
+  return rows[0] ?? null;
+}
+
+function replaceGameSyncChunks(ctx: ServerContext, recordId: string, chunks: string[]) {
+  for (const chunk of gameSyncChunksFor(ctx, recordId)) ctx.db.gameSyncChunks.delete(chunk.id);
+  chunks.forEach((content, sequence) => {
+    ctx.db.gameSyncChunks.insert({ recordId, sequence: String(sequence), content });
+  });
+}
+
+function upsertGameSyncRecord(ctx: ServerContext, userId: string, record: GameSyncRecord): boolean {
+  if (!validSyncRecord(record)) throw new Error("Invalid sync record");
+  const existing = findGameSyncRow(ctx, userId, record.kind, record.id);
+  if (existing && Number(existing.updatedMs) >= record.updatedAt) return false;
+  const values = {
+    userId,
+    kind: record.kind,
+    clientId: record.id,
+    name: record.name,
+    createdMs: String(record.createdAt),
+    updatedMs: String(record.updatedAt),
+    deletedMs: record.deletedAt == null ? "" : String(record.deletedAt),
+    chunkCount: String(record.chunks.length),
+  };
+  const rowId = existing ? existing.id : ctx.db.gameSyncRecords.insert(values).id;
+  if (existing) ctx.db.gameSyncRecords.update(existing.id, values);
+  replaceGameSyncChunks(ctx, rowId, record.chunks);
+  return true;
+}
+
 export default capsule({
   name: "antiyoy-remaster",
 
@@ -231,6 +320,21 @@ export default capsule({
       sequence: string(),
       content: string(),
     }),
+    gameSyncRecords: table({
+      userId: string(),
+      kind: string(),
+      clientId: string(),
+      name: string(),
+      createdMs: string(),
+      updatedMs: string(),
+      deletedMs: string().default(""),
+      chunkCount: string().default("0"),
+    }),
+    gameSyncChunks: table({
+      recordId: string(),
+      sequence: string(),
+      content: string(),
+    }),
   },
 
   queries: {
@@ -266,6 +370,11 @@ export default capsule({
           )
         : [];
       return { lobbies, lobby, messages };
+    }),
+
+    gameSyncLibrary: query((ctx): GameSyncRecord[] => {
+      if (ctx.auth.isGuest) return [];
+      return listGameSyncRecords(ctx, ctx.auth.userId);
     }),
   },
 
@@ -479,6 +588,13 @@ export default capsule({
         body: clean,
       });
     }),
+
+    syncGameLibrary: mutation((ctx, records: GameSyncRecord[]) => {
+      requireAccount(ctx);
+      if (!Array.isArray(records) || records.length > 1000) throw new Error("Too many sync records");
+      for (const record of records) upsertGameSyncRecord(ctx, ctx.auth.userId, record);
+      return listGameSyncRecords(ctx, ctx.auth.userId);
+    }),
   },
 
   endpoints: {
@@ -512,6 +628,18 @@ export default capsule({
       return json({ version: TRAINING_RECORD_VERSION, battles }, {
         headers: { "Content-Disposition": "attachment; filename=antiyoy-training-battles.json", "Cache-Control": "no-store" },
       });
+    }),
+    accountGames: endpoint({ method: "GET", path: "/api/account-games.json" }, (ctx) => {
+      if (ctx.auth.isGuest) return json({ error: "Unauthorized" }, { status: 401 });
+      return json(
+        { version: GAME_SYNC_RECORD_VERSION, games: listGameSyncRecords(ctx, ctx.auth.userId) },
+        {
+          headers: {
+            "Content-Disposition": "attachment; filename=antiyoy-account-games.json",
+            "Cache-Control": "no-store",
+          },
+        }
+      );
     }),
     manifest: endpoint({ method: "GET", path: "/api/manifest.webmanifest" }, () =>
       json(

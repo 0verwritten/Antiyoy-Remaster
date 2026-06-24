@@ -4,8 +4,19 @@
 // texture, skins, city names, language) are intentionally absent.
 
 import { useEffect, useState } from "preact/hooks";
+import { SignInWithGoogle, signOut, useAuth, useMutation } from "lakebed/client";
 import { resetSettings, saveSettings, settings } from "../settings";
-import { getInstallState, installApp, subscribeToInstallState } from "../pwa";
+import {
+  applyAppUpdate,
+  getInstallState,
+  getUpdateState,
+  installApp,
+  refreshAppFromServer,
+  subscribeToInstallState,
+  subscribeToUpdateState,
+} from "../pwa";
+import { syncGameLibrary } from "../sync-library";
+import type { GameSyncRecord } from "../../shared/sync";
 import { Chip } from "./controls";
 
 function Toggle({
@@ -33,11 +44,16 @@ function Toggle({
 }
 
 export function SettingsPanel() {
+  const auth = useAuth();
+  const syncMutation = useMutation<[records: GameSyncRecord[]], GameSyncRecord[]>("syncGameLibrary");
   const [, bump] = useState(0);
   const [installState, setInstallState] = useState(getInstallState);
+  const [updateState, setUpdateState] = useState(getUpdateState);
+  const [syncStatus, setSyncStatus] = useState("");
   const refresh = () => bump((n) => n + 1);
 
   useEffect(() => subscribeToInstallState(() => setInstallState(getInstallState())), []);
+  useEffect(() => subscribeToUpdateState(() => setUpdateState(getUpdateState())), []);
 
   function setSetting<K extends keyof typeof settings>(key: K, value: (typeof settings)[K]) {
     settings[key] = value;
@@ -161,6 +177,90 @@ export function SettingsPanel() {
           <p className="mt-2 text-xs text-[#5b5a50]">Use your browser menu to install this app when supported.</p>
         )}
       </div>
+
+      <div>
+        <label className={labelCls}>Refresh app code</label>
+        <button
+          type="button"
+          disabled={updateState === "checking" || updateState === "unsupported"}
+          onClick={() => {
+            if (updateState === "available") void applyAppUpdate();
+            else void refreshAppFromServer();
+          }}
+          className="min-h-[44px] w-full rounded-xl bg-[#f0eee3] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none disabled:cursor-default disabled:opacity-55 disabled:active:translate-y-0"
+        >
+          {updateState === "available"
+            ? "Apply update"
+            : updateState === "checking"
+              ? "Checking..."
+              : updateState === "current"
+                ? "Refresh from server"
+                : updateState === "error"
+                  ? "Try again"
+                  : "Unavailable"}
+        </button>
+        {updateState === "current" && (
+          <p className="mt-2 text-xs text-[#5b5a50]">Reloads the installed app from the server.</p>
+        )}
+      </div>
+
+      <details className="rounded-2xl bg-[#a39e70] p-4 text-[#2e2e28]">
+        <summary className="cursor-pointer select-none text-lg font-black">
+          Account
+        </summary>
+        <div className="mt-4 flex flex-col gap-3">
+          {auth.isLoading ? (
+            <p className="text-sm font-bold opacity-70">Checking session...</p>
+          ) : auth.isGuest ? (
+            <>
+              <p className="text-sm font-semibold opacity-75">Add an account to merge saves and replays across devices.</p>
+              <SignInWithGoogle
+                returnTo="/?screen=settings"
+                className="min-h-[44px] rounded-xl bg-[#f0eee3] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.2)]"
+              />
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-[#e2dfc8] p-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black">{auth.displayName}</p>
+                  <p className="text-xs font-semibold opacity-65">Signed in for library sync</p>
+                </div>
+                {auth.picture && <img src={auth.picture} alt="" referrerPolicy="no-referrer" className="h-9 w-9 rounded-full" />}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSyncStatus("Syncing...");
+                  syncGameLibrary(syncMutation)
+                    .then((summary) => setSyncStatus(`Synced ${summary.uploaded} local and ${summary.total} account records.`))
+                    .catch((reason) => setSyncStatus(reason instanceof Error ? reason.message : "Sync failed"));
+                }}
+                className="min-h-[44px] w-full rounded-xl bg-[#f0eee3] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none"
+              >
+                Sync saves and replays
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  location.href = "/api/account-games.json";
+                }}
+                className="min-h-[44px] w-full rounded-xl bg-[#e2dfc8] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.15)] active:translate-y-[1px] active:shadow-none"
+              >
+                Download all account games
+              </button>
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="min-h-[44px] w-full rounded-xl bg-[#a3322a]/90 px-3 text-sm font-bold text-white shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none"
+              >
+                Sign out
+              </button>
+              {syncStatus && <p className="text-xs font-bold text-[#5b5a50]">{syncStatus}</p>}
+            </>
+          )}
+        </div>
+      </details>
 
       <button
         type="button"
