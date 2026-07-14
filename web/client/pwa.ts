@@ -131,15 +131,43 @@ export async function applyAppUpdate() {
   return true;
 }
 
+// Marks a reload triggered by refreshAppFromServer so setupPwa can strip it.
+const FRESH_PARAM = "fresh";
+
+async function clearHttpCaches() {
+  if (!("caches" in window)) return;
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  } catch {
+    // Best effort; the cache-busting reload still fetches fresh HTML.
+  }
+}
+
+function reloadBypassingCaches() {
+  const url = new URL(location.href);
+  url.searchParams.set(FRESH_PARAM, Date.now().toString(36));
+  location.replace(url.toString());
+}
+
 export async function refreshAppFromServer() {
   const state = await checkForAppUpdate();
   if (state === "available") return applyAppUpdate();
-  location.reload();
+  // Installed PWAs (iOS standalone especially) can serve the start page from
+  // the HTTP cache on plain reloads; clear caches and bust the URL instead.
+  await clearHttpCaches();
+  reloadBypassingCaches();
   return true;
 }
 
 export function setupPwa() {
   document.title = "Antiyoy Remaster";
+
+  const url = new URL(location.href);
+  if (url.searchParams.has(FRESH_PARAM)) {
+    url.searchParams.delete(FRESH_PARAM);
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
 
   const metadata: Array<[string, string, string]> = [
     ["link", "rel", "manifest"],
@@ -174,7 +202,7 @@ export function setupPwa() {
   });
 
   if ("serviceWorker" in navigator && window.isSecureContext) {
-    window.addEventListener("load", () => {
+    const register = () => {
       registrationPromise = navigator.serviceWorker.register("/api/sw.js", { scope: "/" }).then((registration) => {
         watchRegistration(registration);
         if (!registration.waiting) setUpdateState("current");
@@ -183,6 +211,11 @@ export function setupPwa() {
         setUpdateState("error");
         return null;
       });
-    });
+    };
+    // The bundle can finish loading after the window load event has already
+    // fired (e.g. right after a canonical-domain redirect); register directly
+    // then, or the update state would stay "unsupported" forever.
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register);
   }
 }

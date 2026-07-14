@@ -16,6 +16,8 @@ import {
   subscribeToUpdateState,
 } from "../pwa";
 import { syncGameLibrary } from "../sync-library";
+import { buildFullExport } from "../export-all";
+import { downloadJson } from "../game-storage";
 import type { GameSyncRecord } from "../../shared/sync";
 import { Chip } from "./controls";
 
@@ -50,6 +52,7 @@ export function SettingsPanel() {
   const [installState, setInstallState] = useState(getInstallState);
   const [updateState, setUpdateState] = useState(getUpdateState);
   const [syncStatus, setSyncStatus] = useState("");
+  const [exportStatus, setExportStatus] = useState("");
   const refresh = () => bump((n) => n + 1);
 
   useEffect(() => subscribeToInstallState(() => setInstallState(getInstallState())), []);
@@ -182,7 +185,7 @@ export function SettingsPanel() {
         <label className={labelCls}>Refresh app code</label>
         <button
           type="button"
-          disabled={updateState === "checking" || updateState === "unsupported"}
+          disabled={updateState === "checking"}
           onClick={() => {
             if (updateState === "available") void applyAppUpdate();
             else void refreshAppFromServer();
@@ -193,15 +196,38 @@ export function SettingsPanel() {
             ? "Apply update"
             : updateState === "checking"
               ? "Checking..."
-              : updateState === "current"
-                ? "Refresh from server"
-                : updateState === "error"
-                  ? "Try again"
-                  : "Unavailable"}
+              : updateState === "error"
+                ? "Try again"
+                : "Refresh from server"}
         </button>
-        {updateState === "current" && (
-          <p className="mt-2 text-xs text-[#5b5a50]">Reloads the installed app from the server.</p>
+        {(updateState === "current" || updateState === "unsupported") && (
+          <p className="mt-2 text-xs text-[#5b5a50]">Clears cached files and reloads the app from the server.</p>
         )}
+      </div>
+
+      <div>
+        <label className={labelCls}>Backup</label>
+        <button
+          type="button"
+          onClick={() => {
+            setExportStatus("Preparing export...");
+            buildFullExport(!auth.isLoading && !auth.isGuest)
+              .then((data) => {
+                const day = new Date().toISOString().slice(0, 10);
+                downloadJson(`antiyoy-everything-${day}.json`, data);
+                const saves = data.saves.filter((r) => !r.deletedAt).length;
+                const replays = data.replays.filter((r) => !r.deletedAt).length;
+                setExportStatus(
+                  `Exported ${saves} saves, ${replays} replays, settings and campaign progress${data.account ? ", plus account games" : ""}.`
+                );
+              })
+              .catch(() => setExportStatus("Export failed"));
+          }}
+          className="min-h-[44px] w-full rounded-xl bg-[#f0eee3] px-3 text-sm font-bold text-[#3a3a33] shadow-[0_2px_0_rgba(0,0,0,0.2)] active:translate-y-[1px] active:shadow-none"
+        >
+          Export everything
+        </button>
+        {exportStatus && <p className="mt-2 text-xs font-bold text-[#5b5a50]">{exportStatus}</p>}
       </div>
 
       <details className="rounded-2xl bg-[#a39e70] p-4 text-[#2e2e28]">
